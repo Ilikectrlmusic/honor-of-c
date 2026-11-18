@@ -1,0 +1,7 @@
+101 ICON "assets/rift.ico"
+201 RCDATA "assets/keyart.jpg"
+202 RCDATA "assets/heroes.jpg"
+203 RCDATA "assets/arena.jpg"
+204 RCDATA "assets/units.png"
+205 RCDATA "assets/skills.jpg"
+1 24 "src/app.manifest"
