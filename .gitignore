@@ -5,7 +5,15 @@
 /tests/*.o
 
 # Development captures, progress notes, and asset-production work
-/docs/
+/docs/*
+!/docs/draft.jpg
+!/docs/battle.jpg
+!/docs/living-portraits.mp4
+!/docs/arena-ceremonies.mp4
+!/docs/motion-preview.gif
+!/docs/battle-feedback.mp4
+!/docs/observer.mp4
+!/docs/announcer.md
 /tools/
 
 # Only assets embedded in the game are versioned
