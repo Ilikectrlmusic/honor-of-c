@@ -222,27 +222,52 @@ static V center(int i) {
 int visible(const Game *g, int team, V pos) {
     return g->sight[team][cell(pos)] >= 50;
 }
+/* Stationary defenses are permanent shared observers until destroyed. Cache their
+   layer independently of the moving roster and union both for main view + minimap.
+   'clear' is a fully lit interior, not merely a tile marked targetable. */
+static void illuminate(unsigned char *mask, V p, float clear, float outer) {
+    float rr = outer * outer, inner = clear * clear;
+    int x0 = (int)clampf((p.x - outer) / 40, 0, GW - 1), x1 = (int)clampf((p.x + outer) / 40, 0, GW - 1);
+    int y0 = (int)clampf((p.y - outer) / 40, 0, GH - 1), y1 = (int)clampf((p.y + outer) / 40, 0, GH - 1);
+    for (int y = y0; y <= y1; y++)
+        for (int x = x0; x <= x1; x++) {
+            int n = y * GW + x;
+            if (mask[n] == 255)
+                continue;
+            float dx = x * 40 + 20 - p.x, dy = y * 40 + 20 - p.y, d2 = dx * dx + dy * dy;
+            if (d2 >= rr)
+                continue;
+            int value = d2 <= inner ? 255 : (int)(255 * (rr - d2) / (rr - inner));
+            if (value > mask[n])
+                mask[n] = (unsigned char)value;
+        }
+}
+static unsigned standing_defenses(const Game *g) {
+    unsigned bits = 0;
+    for (int i = 10; i < 24; i++)
+        if (alive(&g->u[i]) && structure(&g->u[i]))
+            bits |= 1u << (i - 10);
+    return bits;
+}
 static void vision(Game *g) {
-    memset(g->sight, 0, sizeof g->sight);
+    unsigned bits = standing_defenses(g);
+    if (bits != g->garrisonMask) {
+        memset(g->garrisonSight, 0, sizeof g->garrisonSight);
+        for (int i = 10; i < 24; i++)
+            if (bits & (1u << (i - 10))) {
+                Unit *u = &g->u[i];
+                int core = u->kind == CORE;
+                illuminate(g->garrisonSight[u->team], u->pos, core ? 545.f : 455.f, core ? 640.f : 555.f);
+            }
+        g->garrisonMask = bits;
+    }
+    memcpy(g->sight, g->garrisonSight, sizeof g->sight);
     for (int i = 0; i < MAXU; i++) {
         Unit *u = &g->u[i];
-        if (!alive(u) || u->team == 2)
+        if (!alive(u) || u->team == 2 || structure(u))
             continue;
-        float r = u->kind == HERO ? 550 : structure(u) ? 490 : 318, rr = r * r;
-        int x0 = (int)clampf((u->pos.x - r) / 40, 0, GW - 1),
-            y0 = (int)clampf((u->pos.y - r) / 40, 0, GH - 1);
-        int x1 = (int)clampf((u->pos.x + r) / 40, 0, GW - 1),
-            y1 = (int)clampf((u->pos.y + r) / 40, 0, GH - 1);
-        for (int y = y0; y <= y1; y++)
-            for (int x = x0; x <= x1; x++) {
-                int n = y * GW + x;
-                if (g->sight[u->team][n] == 255)
-                    continue;
-                float dx = x * 40 + 20 - u->pos.x, dy = y * 40 + 20 - u->pos.y;
-                int intensity = (int)clampf((rr - dx * dx - dy * dy) * (650.f / rr), 0, 255);
-                if (intensity > g->sight[u->team][n])
-                    g->sight[u->team][n] = (unsigned char)intensity;
-            }
+        float r = u->kind == HERO ? 550.f : 318.f;
+        illuminate(g->sight[u->team], u->pos, r * .77955f, r);
     }
     g->sightFrame++;
     g->sightTimer = .20f;
@@ -319,7 +344,8 @@ static void route(Game *g, Unit *u, V to) {
     }
     u->path[u->pathN++] = u->dest;
 }
-static void move(Game *g, Unit *u, V dir, float amount) {
+static void move(Game *g, Unit *u, V dir, float amount, int manualRun) {
+    V old = u->pos;
     dir = norm(dir);
     V v = mul(dir, amount), p = add(u->pos, v);
     if (walkable(g, p))
@@ -328,8 +354,15 @@ static void move(Game *g, Unit *u, V dir, float amount) {
         u->pos.x = p.x;
     else if (walkable(g, vec(u->pos.x, p.y)))
         u->pos.y = p.y;
-    if (lengthv(dir) > .1f) {
-        u->moving = .14f;
+    float travelled = dist(old, u->pos);
+    /* A held movement key still drives the legs against a wall. Keep actual
+       travel for wall slides and AI; never feed visual stride into collision. */
+    if (manualRun && travelled <= .01f)
+        travelled = amount;
+    if (travelled > .01f) {
+        float cycle = u->kind == HERO ? 88.f : u->kind == SIEGE ? 102.f : u->kind == GOLEM ? 73.f : 54.f;
+        u->stride = fmodf(u->stride + travelled / cycle, 1.f);
+        u->moving = .065f;
         u->face = dir;
         if (fabsf(dir.x) > .12f)
             u->dir = dir.x < 0 ? -1 : 1;
@@ -348,7 +381,7 @@ static void travel(Game *g, Unit *u, V to, float dt) {
         u->pathI++;
         p = u->pathI < u->pathN ? u->path[u->pathI] : u->dest;
     }
-    move(g, u, sub(p, u->pos), fminf(dist(p, u->pos), speed(u) * dt));
+    move(g, u, sub(p, u->pos), fminf(dist(p, u->pos), speed(u) * dt), 0);
 }
 static Unit *make(Game *g, int id, int kind, int team, V p) {
     Unit *u = &g->u[id];
@@ -359,6 +392,8 @@ static Unit *make(Game *g, int id, int kind, int team, V p) {
     u->team = team;
     u->pos = u->home = u->dest = p;
     u->target = -1;
+    u->swingTarget = -1;
+    u->stride = fmodf(u->serial * .381966f, 1.f);
     u->dir = team == 1 ? -1 : 1;
     u->face = vec(u->dir, 0);
     u->level = 1;
@@ -413,9 +448,42 @@ static void xp(Game *g, int id, int amt) {
         }
     }
 }
-static void fx(Game *g, int k, V a, V b, float time, float sz, uint32_t c, int n) {
+static Fx *fx(Game *g, int k, V a, V b, float time, float sz, uint32_t c, int n) {
     Fx *f = &g->fx[g->fxCursor++ % MAXFX];
-    *f = (Fx){1, k, n, a, b, time, time, sz, c};
+    *f = (Fx){.live = 1,
+              .kind = k,
+              .n = n,
+              .a = a,
+              .b = b,
+              .life = time,
+              .total = time,
+              .size = sz,
+              .color = c,
+              .anchor = -1};
+    return f;
+}
+static void arrival(Game *g, int id, float seconds, float scale) {
+    Unit *u = &g->u[id];
+    Fx *f = fx(g, FX_ARRIVAL, u->pos, u->pos, seconds, scale, 0, 0);
+    f->anchor = id;
+    f->anchorSerial = u->serial;
+}
+/* Resolve on draw, after all movement/dashes/separation. An old arrival may
+   never be displayed on a corpse or rebound to another life using this slot. */
+int game_fx_position(const Game *g, const Fx *f, V *out) {
+    if (!f->live)
+        return 0;
+    if (f->kind != FX_ARRIVAL) {
+        *out = f->a;
+        return 1;
+    }
+    if (f->anchor < 0 || f->anchor >= HEROES)
+        return 0;
+    const Unit *u = &g->u[f->anchor];
+    if (!alive(u) || u->serial != f->anchorSerial)
+        return 0;
+    *out = u->pos;
+    return 1;
 }
 static void spawn_wave(Game *g) {
     g->waves++;
@@ -472,6 +540,7 @@ void game_init(Game *g, int role, int diff, uint32_t seed) {
             u->reach = h->reach;
             u->gold = 160;
             u->think = rnd(g) * .3f;
+            arrival(g, t * 5 + j, j == 0 ? 1.45f : 1.10f, j == 0 ? 1.f : .67f);
         }
         for (int l = 0; l < 3; l++)
             for (int k = 0; k < 2; k++) {
@@ -504,23 +573,11 @@ void game_init(Game *g, int role, int diff, uint32_t seed) {
         g->u[i].maxhp *= f;
         g->u[i].hp = g->u[i].maxhp;
     }
-    spawn_wave(g);
-    g->wave = 18;
+    g->wave = 7; /* Two seconds for the greeting, then a real five-second warning. */
+    sound(g, VO_WELCOME);
     g->pay = 1;
     g->aim = lane_at(1, .5f);
     vision(g);
-    feed(g, L"双方兵线已出发", GOLD);
-}
-static const wchar_t *uname(const Unit *u) {
-    if (u->kind == HERO)
-        return heroes[u->role].name;
-    if (u->kind == CORE)
-        return L"水晶";
-    if (u->kind == TOWER)
-        return L"防御塔";
-    if (u->kind == GOLEM)
-        return L"山灵";
-    return L"小兵";
 }
 static int valid(const Game *g, int id, int serial) {
     return id >= 0 && id < MAXU && alive(&g->u[id]) && g->u[id].serial == serial;
@@ -528,6 +585,53 @@ static int valid(const Game *g, int id, int serial) {
 static void lock(Game *g, Unit *u, int id) {
     u->target = id;
     u->targetSerial = id < 0 ? 0 : g->u[id].serial;
+}
+/* Wallet credit and its presentation share one authoritative reward event.
+   Passive income never spawns coins; nearby shared gold has a smaller burst. */
+static void bounty(Game *g, int who, V from, int amount) {
+    g->u[who].gold += amount;
+    Fx *f = fx(g, FX_COINS, from, g->u[who].pos, 1.04f, amount < 10 ? .66f : 1.f, GOLD, amount);
+    f->team = who; /* hero slot; only tracked while alive and visible */
+    if (!who && g->time >= g->coinSoundAt) {
+        sound(g, S_COIN);
+        g->coinSoundAt = g->time + .14f;
+    }
+}
+static void kill_card(Game *g, Unit *k, Unit *victim) {
+    int first = !g->firstBlood && k->kind == HERO;
+    if (first)
+        g->firstBlood = 1;
+    if (g->cardCount == 10) { /* Never evict the card currently on screen. */
+        memmove(g->cards + 1, g->cards + 2, 8 * sizeof *g->cards);
+        g->cardCount--;
+    }
+    if (!g->cardCount) {
+        g->cardLife = 2.45f;
+        g->cardStart = g->time;
+    }
+    int voice = VO_EXECUTED;
+    if (k->kind == HERO) {
+        k->multi = k->multi && g->time-k->lastKillAt <= 10.f ? k->multi+1 : 1;
+        k->lastKillAt = g->time;
+        k->spree++;
+        if (first) voice = VO_FIRST;
+        else if (k->multi >= 2) voice = (k->team ? VO_ENEMY_DOUBLE : VO_DOUBLE) + (k->multi > 5 ? 3 : k->multi-2);
+        else if (victim->spree >= 3) voice = VO_SHUTDOWN;
+        else if (k->spree >= 3) voice = (k->team ? VO_ENEMY_SPREE : VO_SPREE) + (k->spree > 7 ? 4 : k->spree-3);
+        else if (k == &g->u[0]) voice = VO_PLAYERKILL;
+        else if (victim == &g->u[0]) voice = VO_PLAYERDEATH;
+        else voice = victim->team ? VO_ALLYKILL : VO_ENEMYKILL;
+    }
+    victim->multi = victim->spree = 0;
+    g->cards[g->cardCount++] = (KillCard){k->kind, k->role, k->team, victim->role, victim->team, first, voice};
+    sound(g, voice);
+    int down = 0;
+    for (int i=5*victim->team; i<5*victim->team+5; ++i)
+        down += g->u[i].used && !alive(&g->u[i]);
+    if (down == 5) {
+        sound(g, VO_ACED);
+        feed(g, victim->team ? L"敌方团灭" : L"我方团灭", victim->team ? JADE : RED);
+    }
 }
 static void die(Game *g, int id, int killer) {
     Unit *u = &g->u[id], *k = &g->u[killer];
@@ -541,6 +645,7 @@ static void die(Game *g, int id, int killer) {
     if (u->kind == CORE) {
         g->winner = 1 - u->team;
         sound(g, g->winner == 0 ? S_WIN : S_LOSE);
+        sound(g, g->winner == 0 ? VO_VICTORY : VO_DEFEAT);
         return;
     }
     if (u->kind == HERO) {
@@ -559,21 +664,19 @@ static void die(Game *g, int id, int killer) {
             g->kills[k->team]++;
         if (k->kind == HERO) {
             k->kills++;
-            k->gold += 180;
+            bounty(g, killer, u->pos, 180);
             xp(g, killer, 140);
         }
         for (int h = 0; h < 10; h++)
             if (h != killer && g->u[h].team != u->team && g->time - u->tag[h] < 8) {
                 g->u[h].assists++;
-                g->u[h].gold += 65;
+                if (h == 0)
+                    bounty(g, h, u->pos, 65);
+                else
+                    g->u[h].gold += 65;
                 xp(g, h, 75);
             }
-        swprintf(msg, 100, L"%ls%ls  击败  %ls%ls",
-                 k->team == 0   ? L"我方"
-                 : k->team == 1 ? L"敌方"
-                                : L"",
-                 uname(k), u->team ? L"敌方" : L"我方", uname(u));
-        feed(g, msg, c);
+        kill_card(g, k, u);
         u->respawn = 7 + u->level * .85f;
         u->stun = u->haste = u->empower = u->slow = 0;
         if (!id || !killer)
@@ -585,11 +688,13 @@ static void die(Game *g, int id, int killer) {
         swprintf(msg, 100, L"%ls路%ls塔已破", ((const wchar_t *[]){L"上", L"中", L"下"})[u->lane],
                  u->team ? L"敌方" : L"我方");
         feed(g, msg, c);
-        game_notice(g, msg);
-        sound(g, S_ALERT);
+        sound(g, u->team ? VO_TOWERUP : VO_TOWERDOWN);
         for (int h = 0; h < 10; h++)
             if (g->u[h].team != u->team) {
-                g->u[h].gold += 80;
+                if (h == killer || h == 0)
+                    bounty(g, h, u->pos, 80);
+                else
+                    g->u[h].gold += 80;
                 xp(g, h, 70);
             }
         return;
@@ -598,7 +703,7 @@ static void die(Game *g, int id, int killer) {
         u->respawn = 43;
         if (k->kind == HERO) {
             k->buff = 35;
-            k->gold += 115;
+            bounty(g, killer, u->pos, 115);
             k->hp = fminf(k->maxhp, k->hp + 160);
             xp(g, killer, 130);
             if (!killer)
@@ -607,14 +712,18 @@ static void die(Game *g, int id, int killer) {
         return;
     }
     if (k->kind == HERO) {
-        k->gold += u->kind == SIEGE ? 54 : 30;
+        bounty(g, killer, u->pos, u->kind == SIEGE ? 54 : 30);
         k->cs++;
     }
     for (int h = 0; h < 10; h++)
         if (alive(&g->u[h]) && g->u[h].team != u->team && dist(u->pos, g->u[h].pos) < 475) {
             xp(g, h, 28);
-            if (h != killer)
-                g->u[h].gold += 9;
+            if (h != killer) {
+                if (h == 0)
+                    bounty(g, h, u->pos, 9);
+                else
+                    g->u[h].gold += 9;
+            }
         }
     u->used = 0;
 }
@@ -706,19 +815,18 @@ static Shot *shot(Game *g, int id, int kind, V p, V v, float time, float dmg, ui
     s->target = -1;
     return s;
 }
-static void basic(Game *g, int id, int target) {
+static void pose(Unit *u, int type, float duration) {
+    u->pose = type;
+    u->poseDir = u->dir;
+    u->anim = u->actionTime = duration;
+}
+static void release_basic(Game *g, int id, int target) {
     Unit *u = &g->u[id], *b = &g->u[target];
-    if (u->atk > 0 || u->stun > 0)
-        return;
-    u->face = norm(sub(b->pos, u->pos));
-    if (fabsf(u->face.x) > .1f)
-        u->dir = u->face.x < 0 ? -1 : 1;
-    u->anim = .24f;
-    u->atk = u->period * (u->haste > 0 ? .58f : 1);
     float dmg = u->power * (u->buff > 0 ? 1.25f : 1);
     uint32_t c = u->kind == HERO ? heroes[u->role].color : teamColor[u->team];
     if (u->reach >= 140) {
-        Shot *s = shot(g, id, 0, u->pos, vec(0, 0), 2, dmg, c);
+        V muzzle = add(u->pos, mul(norm(sub(b->pos, u->pos)), structure(u) ? 0 : u->kind == HERO ? 23 : 15));
+        Shot *s = shot(g, id, 0, muzzle, vec(0, 0), 2, dmg, c);
         s->target = target;
         s->tserial = b->serial;
         s->radius = structure(u) ? 6 : u->kind == HERO ? 4 : 3;
@@ -729,28 +837,82 @@ static void basic(Game *g, int id, int target) {
     if (!id)
         sound(g, S_ATTACK);
     else if (g->soundN == 0 && dist(u->pos, g->u[0].pos) < 460 && ((u->serial + (int)(g->time * 6)) % 6 == 0))
-        sound(g, 17);
+        sound(g, S_AMBIENT);
+}
+static void basic(Game *g, int id, int target) {
+    Unit *u = &g->u[id];
+    if (u->atk > 0 || u->stun > 0 || (u->anim > 0 && u->pose >= POSE_SKILL))
+        return;
+    if (u->kind == GOLEM) {
+        /* Plant both feet. The marker drags toward the target, then locks;
+           the fist strikes that piece of ground even if the target sidesteps. */
+        V toward = sub(g->u[target].pos, u->pos);
+        u->stoneAim = add(u->pos, mul(u->face, fminf(u->reach, lengthv(toward))));
+        pose(u, POSE_ATTACK, STONE_CYCLE);
+        u->atk = u->period;
+        u->swingTarget = target;
+        u->swingSerial = g->u[target].serial;
+        u->releaseIn = STONE_CONTACT;
+        return;
+    }
+    u->face = norm(sub(g->u[target].pos, u->pos));
+    if (fabsf(u->face.x) > .1f)
+        u->dir = u->face.x < 0 ? -1 : 1;
+    u->atk = u->period * (u->haste > 0 ? .58f : 1);
+    if (structure(u)) {
+        release_basic(g, id, target);
+        return;
+    }
+    pose(u, POSE_ATTACK, fminf(u->atk * .80f, u->kind == SIEGE ? .64f : u->kind == GOLEM ? .60f : .47f));
+    u->swingTarget = target;
+    u->swingSerial = g->u[target].serial;
+    u->releaseIn = u->actionTime * ((u->kind == HERO && u->role == 1) ? .66f : .50f);
 }
 static V bounded(V a, V b, float range) {
     V v = sub(b, a);
     return add(a, mul(norm(v), fminf(range, lengthv(v))));
 }
-static V dash(Game *g, Unit *u, V d, float range) {
-    V start = u->pos;
+static V dash_end(const Game *g, V from, V d, float range) {
     for (int i = 0; i < (int)(range / 6); i++) {
-        V p = add(u->pos, mul(d, 6));
+        V p = add(from, mul(d, 6));
         if (!walkable(g, p))
             break;
-        u->pos = p;
+        from = p;
     }
+    return from;
+}
+static void dash(Game *g, Unit *u, V d, float range) {
+    u->pos = dash_end(g, u->pos, d, range);
     u->repath = 0;
-    return start;
+}
+static void ultimate_fx(Game *g, int type, Unit *u, V a, V b, float duration, float radius) {
+    fx(g, type, a, b, duration, radius, heroes[u->role].color, u->role)->team = u->team;
+}
+/* Melee ultimates resolve on their authored contact frame. Ranged zones have
+   their own projectile timer and survive the caster's subsequent movement. */
+static void release_ultimate(Game *g, int id) {
+    Unit *u = &g->u[id];
+    V p = u->pos, d = u->ultVector;
+    float a = u->power * (u->buff > 0 ? 1.25f : 1);
+    if (u->role == 0) {
+        Shot *s = shot(g, id, 2, p, mul(d, 710), .62f, a * 3.15f, heroes[0].color);
+        s->radius = 73;
+        s->stun = .82f;
+        s->style = SHOT_FIREBLADE;
+        ultimate_fx(g, FX_ULT_IMPACT, u, p, add(p, mul(d, 90)), .43f, 80);
+    } else {
+        int tank = u->role == 3;
+        u->pos = u->ultAim;
+        u->repath = 0;
+        area(g, id, u->pos, tank ? 162 : 128, a * (tank ? 2.2f : 2.65f), 0, tank ? 1.45f : 0, !tank);
+        ultimate_fx(g, FX_ULT_IMPACT, u, u->pos, u->ultStart, tank ? .91f : .64f, tank ? 162 : 128);
+    }
 }
 int game_cast(Game *g, int id, int slot, V aim) {
     if (slot < 0 || slot > 2 || id < 0 || id >= 10 || g->winner >= 0)
         return 0;
     Unit *u = &g->u[id];
-    if (!alive(u) || u->stun > 0 || u->cd[slot] > .001f)
+    if (!alive(u) || u->stun > 0 || u->cd[slot] > .001f || (u->pose == POSE_ULT && u->anim > 0))
         return 0;
     int r = u->role;
     const HeroDef *h = &heroes[r];
@@ -763,7 +925,8 @@ int game_cast(Game *g, int id, int slot, V aim) {
         u->dir = d.x < 0 ? -1 : 1;
     u->cd[slot] = h->cd[slot];
     u->recall = 0;
-    u->anim = .30f;
+    u->swingTarget = -1;
+    pose(u, slot == 2 ? POSE_ULT : POSE_SKILL, slot == 2 ? (float[]){.57f, .69f, .91f, .71f, .45f}[r] : .31f);
     float a = u->power * (u->buff > 0 ? 1.25f : 1);
     uint32_t c = h->color;
     Shot *s;
@@ -787,10 +950,12 @@ int game_cast(Game *g, int id, int slot, V aim) {
                 damage(g, id, j, a * 1.7f, 0, 0, 1);
                 u->hp = fminf(u->maxhp, u->hp + 33);
             }
-    } else if (r == 0 && slot == 2) {
-        s = shot(g, id, 2, p, mul(d, 710), .62f, a * 3.15f, c);
-        s->radius = 73;
-        s->stun = .82f;
+    } else if (slot == 2 && (r == 0 || r == 3 || r == 4)) {
+        u->ultVector = d;
+        u->ultStart = p;
+        u->ultAim = r == 0 ? add(p, mul(d, 90)) : dash_end(g, p, d, fminf(dist(p, aim), r == 3 ? 232 : 295));
+        u->ultWindup = u->actionTime * .50f;
+        ultimate_fx(g, FX_ULT_CAST, u, p, u->ultAim, u->ultWindup, r == 3 ? 162 : r == 4 ? 128 : 73);
     } else if ((r == 1 && slot == 0) || (r == 2 && slot == 0) || (r == 4 && slot == 1)) {
         s = shot(g, id, r == 1 ? 2 : 1, p, mul(d, r == 2 ? 510 : 760), r == 2 ? .94f : .72f,
                  a * (r == 1 ? 1.8f : 2.05f), c);
@@ -809,7 +974,11 @@ int game_cast(Game *g, int id, int slot, V aim) {
         s->radius = rad;
         s->stun = slot == 1 ? 1.25f : 0;
         s->slow = slot == 2 ? 1.7f : 0;
-        fx(g, FX_ZONE, q, q, delay, rad, c, r == 1 ? 1 : slot == 2 ? 2 : 3);
+        if (slot == 2) {
+            s->style = r == 1 ? SHOT_ARROW_RAIN : SHOT_METEOR;
+            ultimate_fx(g, FX_ULT_CAST, u, q, p, delay, rad);
+        } else
+            fx(g, FX_ZONE, q, q, delay, rad, c, 3);
     } else if (r == 3 && slot == 0) {
         area(g, id, p, 143, a * 1.65f, 1.8f, 0, 0);
         fx(g, FX_RING, p, p, .45f, 143, c, 0);
@@ -819,12 +988,6 @@ int game_cast(Game *g, int id, int slot, V aim) {
                 g->u[j].shield = fmaxf(g->u[j].shield, 130 + a * 1.5f);
                 fx(g, FX_HEAL, g->u[j].pos, p, .7f, 52, c, 0);
             }
-    } else if ((r == 3 || r == 4) && slot == 2) {
-        dash(g, u, d, fminf(dist(p, aim), r == 3 ? 232 : 295));
-        q = u->pos;
-        fx(g, FX_LINE, p, q, .38f, 24, c, 0);
-        area(g, id, q, r == 3 ? 162 : 128, a * (r == 3 ? 2.2f : 2.65f), 0, r == 3 ? 1.45f : 0, r == 4);
-        fx(g, FX_RING, q, q, .55f, r == 3 ? 162 : 128, c, 0);
     }
     return 1;
 }
@@ -849,14 +1012,19 @@ void game_order(Game *g, V dest, int target, int attackMove) {
     g->mark = target >= 0 ? dest : u->dest;
     g->markTime = .8f;
 }
-void game_recall(Game *g) {
-    Unit *u = &g->u[0];
-    if (!alive(u) || u->stun > 0 || g->winner >= 0)
+static void begin_recall(Game *g, int id) {
+    Unit *u = &g->u[id];
+    if (!alive(u) || u->recall > 0 || u->stun > 0 || u->ultWindup > 0 || g->winner >= 0)
         return;
     u->recall = 4;
+    u->swingTarget = -1;
     u->order = 0;
     lock(g, u, -1);
-    game_notice(g, L"回城中 · 移动、施法或受击将中断");
+    if (!id)
+        game_notice(g, L"回城中 · 移动、施法或受击将中断");
+}
+void game_recall(Game *g) {
+    begin_recall(g, 0);
 }
 void game_rally(Game *g, V pos) {
     if (!alive(&g->u[0]) || g->winner >= 0)
@@ -886,8 +1054,8 @@ void game_rally(Game *g, V pos) {
     }
     g->rallyTime = 12;
     g->rallyCd = 22;
-    sound(g, S_ALERT);
-    game_notice(g, L"集结信号已发出 · 附近队友向标记靠拢");
+    sound(g, VO_RALLY);
+    feed(g, L"请求集合  ·  向信标靠拢", JADE);
 }
 static int pick(Game *g, int id, float radius, int neutral) {
     Unit *u = &g->u[id];
@@ -950,17 +1118,22 @@ static void march(Game *g, Unit *u, float dt) {
     travel(g, u, p, dt);
 }
 static void player(Game *g, Unit *u, Input in, float dt) {
-    if (fabsf(in.x) + fabsf(in.y) > .05f) {
-        u->order = 0;
+    int steering = fabsf(in.x) + fabsf(in.y) > .05f;
+    if (steering) {
+        /* Direction overrides the path, not a deliberately selected enemy or
+           an already committed swing. Never auto-chase against a held key. */
+        if (u->order != 2) {
+            u->order = 0;
+            lock(g, u, -1);
+        }
         u->recall = 0;
-        lock(g, u, -1);
-        move(g, u, vec(in.x, in.y), speed(u) * dt);
+        move(g, u, vec(in.x, in.y), speed(u) * dt, 1);
     }
     if (u->recall > 0)
         return;
     if (u->order == 2 && valid(g, u->target, u->targetSerial) && !structure(&g->u[u->target]) &&
         !visible(g, 0, g->u[u->target].pos)) {
-        u->order = 1;
+        u->order = steering ? 0 : 1;
         lock(g, u, -1);
     }
     if (u->order == 2 && !valid(g, u->target, u->targetSerial)) {
@@ -970,7 +1143,8 @@ static void player(Game *g, Unit *u, Input in, float dt) {
     if (u->order == 2) {
         Unit *v = &g->u[u->target];
         if (dist(u->pos, v->pos) > u->reach + 14) {
-            travel(g, u, v->pos, dt);
+            if (!steering)
+                travel(g, u, v->pos, dt);
             return;
         }
         basic(g, 0, u->target);
@@ -980,8 +1154,6 @@ static void player(Game *g, Unit *u, Input in, float dt) {
         int a = pick(g, 0, u->reach + 14, in.attack);
         if (a >= 0) {
             basic(g, 0, a);
-            if (u->order == 3)
-                return;
         }
     }
     if (in.attack && u->order == 0 && fabsf(in.x) + fabsf(in.y) < .05f) {
@@ -1014,6 +1186,24 @@ static void brain(Game *g, int id, float dt) {
     Unit *u = &g->u[id];
     int hero = u->kind == HERO;
     if (u->kind == GOLEM) {
+        /* A camp guards its clearing. Close heroes can draw it without first
+           landing a hit, but it never searches globally or pursues past leash. */
+        if ((u->aggro<=0 || !valid(g,u->target,u->targetSerial)) && dist(u->pos,u->home)<108) {
+            int near = -1;
+            float best = 112;
+            for (int h = 0; h < HEROES; h++)
+                if (alive(&g->u[h]) && g->u[h].grace <= 0) {
+                    float d = dist(g->u[h].pos, u->pos);
+                    if (d < best && dist(g->u[h].pos, u->home) < 178) {
+                        best = d;
+                        near = h;
+                    }
+                }
+            if (near >= 0) {
+                lock(g, u, near);
+                u->aggro = 5;
+            }
+        }
         if (u->aggro <= 0 || dist(u->pos, u->home) > 250 || !valid(g, u->target, u->targetSerial)) {
             lock(g, u, -1);
             if (dist(u->pos, u->home) > 5) {
@@ -1073,6 +1263,23 @@ static void brain(Game *g, int id, float dt) {
         }
     }
     if (hero && u->retreat) {
+        /* Retreat on foot under fire; once safe, bots can use exactly the same
+           interruptible fountain return and arrival as the human player. */
+        /* A four-second channel is not worth it if walking home is as fast.
+           Leave a second's margin for starting the channel and nearby danger. */
+        if (dist(u->pos, u->home) > u->speed * 5.f && g->time - u->lastCombat > 4.f && u->stun <= 0) {
+            int safe = 1;
+            for (int j = 0; j < MAXU && safe; j++) {
+                Unit *v = &g->u[j];
+                if (alive(v) && hostile(u, v) && (v->kind != GOLEM || v->target == id) &&
+                    dist(u->pos, v->pos) < 350)
+                    safe = 0;
+            }
+            if (safe) {
+                begin_recall(g, id);
+                return;
+            }
+        }
         if (dist(u->pos, u->home) > 100)
             travel(g, u, u->home, dt);
         if (u->role == 3 && u->shield < 60 && u->hp < .4f * u->maxhp)
@@ -1141,7 +1348,7 @@ static void brain(Game *g, int id, float dt) {
             basic(g, id, a);
             if (hero && u->reach > 200 && v->kind == HERO && v->reach < 140 && d < u->reach * .62f &&
                 u->atk > .25f)
-                move(g, u, sub(u->pos, v->pos), speed(u) * dt * .88f);
+                move(g, u, sub(u->pos, v->pos), speed(u) * dt * .88f, 0);
         } else if (!structure(u))
             travel(g, u, v->pos, dt);
         return;
@@ -1168,7 +1375,11 @@ static void shots(Game *g, float dt) {
         if (s->kind == 3) {
             if (s->life <= 0) {
                 area(g, s->owner, s->p, s->radius, s->damage, s->slow, s->stun, 0);
-                fx(g, FX_BURST, s->p, s->p, .55f, s->radius, s->color, 0);
+                if (s->style == SHOT_ARROW_RAIN || s->style == SHOT_METEOR)
+                    ultimate_fx(g, FX_ULT_IMPACT, k, s->p, s->p, s->style == SHOT_METEOR ? .85f : .59f,
+                                s->radius);
+                else
+                    fx(g, FX_BURST, s->p, s->p, .55f, s->radius, s->color, 0);
                 s->live = 0;
             }
             continue;
@@ -1215,6 +1426,37 @@ static void shots(Game *g, float dt) {
         }
     }
 }
+static void stone_action(Game *g, int id, float dt) {
+    Unit *u = &g->u[id];
+    if (u->swingTarget < 0)
+        return;
+    /* No ghost contact if the victim died/reused its slot, or if the camp reset. */
+    if (!valid(g, u->swingTarget, u->swingSerial) || u->aggro <= 0) {
+        u->swingTarget = -1;
+        u->anim = 0;
+        return;
+    }
+    float track = clampf(u->releaseIn - (STONE_CONTACT - STONE_TRACK), 0, dt);
+    if (track > 0) {
+        V aim = bounded(u->pos, g->u[u->swingTarget].pos, u->reach);
+        u->stoneAim = add(u->stoneAim, mul(sub(aim, u->stoneAim), 1 - expf(-8.f * track)));
+        V d = norm(sub(u->stoneAim, u->pos));
+        if (lengthv(d) > .1f)
+            u->face = d;
+        if (fabsf(d.x) > .1f)
+            u->dir = u->poseDir = d.x < 0 ? -1 : 1;
+    }
+    if ((u->releaseIn -= dt) > 0)
+        return;
+    u->swingTarget = -1;
+    fx(g, FX_EARTH, u->stoneAim, u->pos, .44f, STONE_RADIUS, GOLD, 0);
+    if (dist(g->u[0].pos, u->pos) < 410)
+        sound(g, S_STONE);
+    for (int j = 0; j < MAXU; ++j)
+        if (alive(&g->u[j]) && hostile(u, &g->u[j]) && !structure(&g->u[j]) &&
+            dist(g->u[j].pos, u->stoneAim) <= STONE_RADIUS)
+            damage(g, id, j, u->power, 0, 0, 0);
+}
 static void respawn(Game *g, int id) {
     Unit *u = &g->u[id];
     u->pos = add(u->home, vec(id < 10 ? (id % 5 - 2) * 19 : 0, 0));
@@ -1222,6 +1464,9 @@ static void respawn(Game *g, int id) {
     u->serial = ++g->serial;
     u->grace = u->kind == HERO ? 1.7f : 0;
     u->retreat = u->order = u->pathN = u->pathI = 0;
+    u->swingTarget = -1;
+    u->ultWindup = u->anim = u->moving = 0;
+    u->pose = POSE_READY;
     u->repath = 0;
     u->wp = u->team == 1 ? nway(u->lane) - 2 : 1;
     for (int i = 0; i < 3; i++)
@@ -1229,7 +1474,10 @@ static void respawn(Game *g, int id) {
     for (int i = 0; i < 10; i++)
         u->tag[i] = -100;
     lock(g, u, -1);
-    fx(g, FX_HEAL, u->pos, u->pos, .8f, 62, JADE, 0);
+    if (u->kind == HERO)
+        arrival(g,id,1.45f,1.f);
+    else
+        fx(g, FX_HEAL, u->pos, u->pos, .8f, 62, JADE, 0);
     if (!id)
         game_notice(g, L"已重返战场");
 }
@@ -1238,9 +1486,17 @@ void game_step(Game *g, float dt, Input in) {
         return;
     dt = fminf(dt, .1f);
     g->time += dt;
+    float previousWave = g->wave;
     g->wave -= dt;
+    if (!g->waves && previousWave > 5 && g->wave <= 5)
+        sound(g, VO_COUNTDOWN);
     g->pay -= dt;
     g->noticeTime -= dt;
+    if (g->cardCount && (g->cardLife -= dt) <= 0) {
+        memmove(g->cards, g->cards + 1, (--g->cardCount) * sizeof *g->cards);
+        g->cardStart = g->time;
+        g->cardLife = g->cardCount > 1 ? 1.55f : 2.45f;
+    }
     g->markTime -= dt;
     g->rallyCd -= dt;
     if (g->rallyTime > 0 && (g->rallyTime -= dt) <= 0) {
@@ -1250,10 +1506,12 @@ void game_step(Game *g, float dt, Input in) {
                 g->u[id].wp = nearest_wp(&g->u[id]);
         }
     }
-    if ((g->sightTimer -= dt) <= 0)
-        vision(g);
+    g->sightTimer-=dt;
     if (g->wave <= 0) {
         spawn_wave(g);
+        if (g->waves == 1) {
+            sound(g, VO_MARCH);
+        }
         g->wave += g->time > 360 ? 14 : 18;
         if (g->waves == 21)
             feed(g, L"决战时刻 · 兵线加速集结", GOLD);
@@ -1295,21 +1553,65 @@ void game_step(Game *g, float dt, Input in) {
             u->shield = fmaxf(0, u->shield - dt * 6);
             float regen = dist(u->home, u->pos) < 188 ? .135f : g->time - u->lastCombat > 6 ? .009f : .0015f;
             u->hp = fminf(u->maxhp, u->hp + regen * u->maxhp * dt);
-            if (i == 0 && u->recall > 0) {
-                if (in.x || in.y || in.attack) {
+            if (u->recall > 0) {
+                if (i == 0 && !g->autoplay && (in.x || in.y || in.attack)) {
                     u->recall = 0;
                 } else if ((u->recall -= dt) <= 0) {
                     u->pos = u->home;
                     u->order = u->pathN = 0;
                     u->repath = 0;
-                    fx(g, FX_HEAL, u->pos, u->pos, .8f, 70, JADE, 0);
-                    game_notice(g, L"已抵达泉水");
+                    arrival(g, i, 1.45f, 1.f);
+                    if (!i)
+                        game_notice(g, L"已抵达泉水");
                 } else
                     continue;
             }
         }
-        if (u->stun > 0)
+        if (u->stun > 0) {
+            if (u->kind == GOLEM)
+                u->anim = 0;
+            u->swingTarget = -1;
+            if (u->ultWindup > 0) {
+                u->ultWindup = 0;
+                u->anim = 0;
+            }
             continue;
+        }
+        if (u->ultWindup > 0) {
+            u->ultWindup -= dt;
+            if (u->role == 3) {
+                float t = clampf((1 - u->ultWindup / (u->actionTime * .5f) - .20f) / .80f, 0, 1);
+                float ease = t*t*(3-2*t);
+                if (!i && !g->autoplay) {
+                    /* Advance from the current (possibly steered) position, not
+                       the original takeoff point. Still land on the marked aim. */
+                    float prev = clampf(t-dt/(u->actionTime*.4f),0,1);
+                    prev = prev*prev*(3-2*prev);
+                    float fraction = clampf((ease-prev)/fmaxf(.00001f,1-prev),0,1);
+                    u->pos = add(u->pos,mul(sub(u->ultAim,u->pos),fraction));
+                } else u->pos = add(u->ultStart, mul(sub(u->ultAim, u->ultStart), ease));
+            }
+            if (!i && !g->autoplay && (in.x || in.y)) {
+                /* Keep the skill's locked direction/landing point; the player
+                   may still steer their feet during the startup animation. */
+                move(g,u,vec(in.x,in.y),speed(u)*dt,1);
+            }
+            if (u->ultWindup <= 0)
+                release_ultimate(g, i);
+            continue;
+        }
+        if (u->kind == GOLEM && u->pose == POSE_ATTACK && u->anim > 0) {
+            stone_action(g, i, dt);
+            continue;
+        }
+        if (u->swingTarget >= 0 && (u->releaseIn -= dt) <= 0) {
+            int target = u->swingTarget;
+            u->swingTarget = -1;
+            if (valid(g, target, u->swingSerial) && dist(u->pos, g->u[target].pos) <= u->reach + 48)
+                release_basic(g, i, target);
+            if (g->winner >= 0)
+                break;
+        }
         if (i == 0 && !g->autoplay)
             player(g, u, in, dt);
         else
@@ -1341,4 +1643,7 @@ void game_step(Game *g, float dt, Input in) {
                 b->pos = bb;
         }
     }
+    /* Don't leave a phantom observer for one tick after its tower is destroyed. */
+    if (g->sightTimer <= 0 || standing_defenses(g) != g->garrisonMask)
+        vision(g);
 }
