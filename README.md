@@ -1,8 +1,10 @@
+<p align="center">
+  <img src="assets/rift.ico" width="128" height="128" alt="岚境 RIFTWARD 图标" />
+</p>
+
 <h1 align="center">岚境 · RIFTWARD</h1>
 
 <p align="center">用纯 C11 打造的 Windows 单机 5v5 推塔游戏</p>
-
-<p align="center"><strong>无需联网 · 9 名本地 AI 队友与对手 · 原创英雄与美术</strong></p>
 
 ![游戏实机画面](docs/battle.jpg)
 
@@ -40,18 +42,6 @@
 - **动态演出和音效**：英雄动作、技能特效、击杀播报、原创配乐和水晶结算动画。
 - **完全离线**：使用 Windows 原生图形与音频接口，无需账号、服务器或游戏引擎。
 
-## 运行与构建
-
-**系统：** 64 位 Windows 10 / 11。
-
-目前需要从源码编译。安装 **MinGW-w64 GCC 和 windres**（推荐 MSYS2 UCRT64），将工具链的 `bin` 目录加入 `PATH`，然后在项目目录运行：
-
-```bat
-build.bat
-```
-
-构建后运行 `Riftward.exe` 即可。图片和音频均嵌入可执行文件，复制 EXE 到另一台兼容的 Windows 电脑也能运行。
-
 ## 基本操作
 
 | 按键 | 操作 |
@@ -68,12 +58,21 @@ build.bat
 
 第一次游玩推荐选择 **青翎** 和 **入门** 难度，跟随兵线推进，利用小兵保护拆除防御塔，最后攻击敌方水晶。
 
+## 运行与构建
+
+**系统：** 64 位 Windows 10 / 11。
+
+目前需要从源码编译。安装 **MinGW-w64 GCC 和 windres**（推荐 MSYS2 UCRT64），将工具链的 `bin` 目录加入 `PATH`，然后在项目目录运行：
+
+```bat
+build.bat
+```
+
+构建后运行 `Riftward.exe` 即可。图片和音频均嵌入可执行文件，复制 EXE 到另一台兼容的 Windows 电脑也能运行。
+
 ## 开发与测试
 
 项目以 **C11 + Win32 + Direct2D / DirectWrite / WIC / WinMM** 实现，不依赖商业游戏引擎。世界模拟、AI、渲染、动画和音频均保存在 `src/` 中。
 
 运行 `test.bat` 可以执行规则测试、重新构建并生成渲染截图。更多播报设计与音效说明见 [播报文档](docs/announcer.md)。
 
----
-
-<p align="center">以 C 语言探索完整游戏开发。</p>
