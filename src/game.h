@@ -7,7 +7,8 @@
 #define MAXU 208
 #define MAXP 256
 #define MAXFX 320
-#define HEROES 10
+#define HEROES 10       /* field slots: five per side */
+#define HERO_COUNT 10   /* selectable roster, independent of slots */
 #define MOB0 28
 #define GW 75
 #define GH 55
@@ -31,7 +32,7 @@ enum {
     FX_EARTH
 };
 enum { POSE_READY, POSE_ATTACK, POSE_SKILL, POSE_ULT };
-enum { SHOT_PLAIN, SHOT_FIREBLADE, SHOT_ARROW_RAIN, SHOT_METEOR };
+enum { SHOT_PLAIN, SHOT_FIREBLADE, SHOT_ARROW_RAIN, SHOT_METEOR, SHOT_SEAL };
 enum {
     S_ATTACK,
     S_HIT,
@@ -47,7 +48,7 @@ enum {
     S_AMBIENT,
     S_STONE,
     S_COIN,
-    S_PICK0, S_PICK1, S_PICK2, S_PICK3, S_PICK4, S_VS, S_FRACTURE,
+    S_PICK0, S_PICK1, S_PICK2, S_PICK3, S_PICK4, S_PICK5, S_PICK6, S_PICK7, S_PICK8, S_PICK9, S_VS, S_FRACTURE,
     VO_COUNTDOWN,
     VO_MARCH,
     VO_FIRST,
@@ -88,12 +89,17 @@ enum {
 #define STONE_TRACK .32f
 #define STONE_CONTACT .74f
 #define STONE_CYCLE 1.07f
+#define WIND_ARROW_RANGE 535.f
+#define TIDE_ECHO_RANGE 515.f
+#define TIDE_ECHO_RADIUS 86.f
+#define AEGIS_RADIUS 158.f
+#define ARC_REACH 180.f
 typedef struct {
     const wchar_t *name, *role, *tag, *bio, *skill[3], *desc[3];
     uint32_t color;
     float health, attack, reach, speed, period, cd[3];
 } HeroDef;
-extern const HeroDef heroes[5];
+extern const HeroDef heroes[HERO_COUNT];
 extern const wchar_t *itemNames[3], *itemDesc[3];
 typedef struct {
     int used, serial, kind, team, role, lane, tier, dir, target, targetSerial, mode, wp, kills, deaths,
@@ -131,8 +137,17 @@ typedef struct {
 typedef struct {
     int sourceKind, sourceRole, sourceTeam, victimRole, victimTeam, first, voice;
 } KillCard;
+/* Per-bot observations use simulation time; pausing cannot grant reactions. */
 typedef struct {
+    int observedSerial, friends, rivals, buddy, strafeSide, careSlot;
+    float sampleTime, readyAt, skillAt, strafeAt, evadeAt, evadeUntil, nextDodge, careAt;
+    V sample, velocity, escape;
+} BotMind;
+typedef struct {
+    int training, awaitingSpawn, practiceHits;
+    float practiceDamage, lastDamage;
     Unit u[MAXU];
+    BotMind bot[HEROES];
     Shot shot[MAXP];
     Fx fx[MAXFX];
     Feed feed[4];
@@ -165,8 +180,14 @@ V norm(V a);
 float clampf(float x, float lo, float hi);
 V lane_at(int lane, float progress);
 void game_init(Game *g, int role, int diff, uint32_t seed);
+void game_prepare_match(Game *g,int role,int diff,uint32_t seed);
+void game_deploy(Game *g);
+void game_training(Game *g,int role);
 void game_step(Game *g, float dt, Input input);
 int game_cast(Game *g, int id, int slot, V aim);
+/* Landing positions in impact order for the five new ground-target ultimates.
+   The aim guide and hit simulation deliberately consume the same geometry. */
+int hero_seals(int role,V from,V aim,V facing,V out[5],float *radius);
 void game_order(Game *g, V dest, int target, int attackMove);
 void game_recall(Game *g);
 int game_buy(Game *g, int id, int item);

@@ -6,19 +6,26 @@
 
 # Development captures, progress notes, and asset-production work
 /docs/*
+# Demonstration videos remain local and are not committed
+*.mp4
+*.webm
+*.mov
+*.avi
+*.mkv
 !/docs/draft.jpg
 !/docs/battle.jpg
-!/docs/living-portraits.mp4
-!/docs/arena-ceremonies.mp4
 !/docs/motion-preview.gif
-!/docs/battle-feedback.mp4
-!/docs/observer.mp4
 !/docs/announcer.md
-/tools/
+/tools/*
+!/tools/pack_motion.py
+!/tools/pack_roster.py
+!/tools/pack_runtime_art.ps1
+!/tools/audit_exe.py
 
 # Only assets embedded in the game are versioned
 /assets/*
 !/assets/audio/
+!/assets/runtime-art/
 /assets/audio/*
 !/assets/rift.ico
 !/assets/keyart.jpg
@@ -29,6 +36,13 @@
 !/assets/motion-0.png
 !/assets/motion-1.png
 !/assets/motion-2.png
+!/assets/motion-3.png
+!/assets/motion-4.png
+!/assets/roster-busts.png
+!/assets/roster-domains.jpg
+!/assets/roster-cards.jpg
+!/assets/roster-skills.jpg
+!/assets/practice-court.jpg
 !/assets/ultimate.png
 !/assets/portraits-silk.png
 !/assets/portraits-iron.png

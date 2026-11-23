@@ -67,7 +67,7 @@ static void hit_frame(int role, int kind) {
 }
 
 int main(void) {
-    for (int role=0;role<5;role++) {
+    for (int role=0;role<HERO_COUNT;role++) {
         duel(role);
         game_order(&g,g.u[5].pos,5,0);
         for(int i=0;i<40;i++) {
@@ -79,7 +79,7 @@ int main(void) {
         }
         assert(g.u[5].hp<5000 || projectiles(0)>0);
     }
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < HERO_COUNT; i++)
         hit_frame(i, HERO);
     hit_frame(0, MELEE);
     hit_frame(0, RANGED);
@@ -128,12 +128,12 @@ int main(void) {
     g.u[0].stun = .3f;
     game_step(&g, tick, (Input){1,0,0});
     assert(g.u[0].moving <= 0 && g.u[0].stride == phase);
-    for (int role = 0; role < 5; role++) {
+    for (int role = 0; role < HERO_COUNT; role++) {
         duel(role);
         Unit *u = &g.u[0], *v = &g.u[5];
         u->atk = 99;
         assert(game_cast(&g, 0, 2, v->pos));
-        assert(effects(FX_ULT_CAST, role) == 1);
+        assert(effects(FX_ULT_CAST, role) == (role==6||role==7?3:role==9?5:1));
         assert(!game_cast(&g, 0, 0, v->pos) && u->pose == POSE_ULT);
         assert(v->hp == 5000);
         int impact = 0, airborne = 0;
@@ -152,6 +152,6 @@ int main(void) {
     for (int i = 0; i < 70; i++)
         game_step(&g, tick, still);
     assert(!projectiles(0) && g.u[5].hp == 5000);
-    puts("motion checks passed: strides, 8 attack contacts, cancellation and 5 distinct ultimate timelines");
+    puts("motion checks passed: strides, 13 attack contacts, cancellation and 10 ultimate timelines");
     return 0;
 }

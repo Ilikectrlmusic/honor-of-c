@@ -160,7 +160,18 @@ static void make_mesh(Living *l) {
         for (int i = 0; i < l->nx; i++) {
             Node *n = &l->mesh[j * l->nx + i];
             float x = fminf(i * STEP, l->w) / (float)l->w, y = fminf(j * STEP, l->h) / (float)l->h;
-            if (id >= RIG_FLAME)
+            if (id >= RIG_STORM) {
+                /* Transparent cutouts only. Anchor the waist and offset the
+                   breathing, weapons, loose sleeves and hair onto separate phases. */
+                float wind=(float[]){.90f,1.35f,.69f,1.16f,1.55f}[id-RIG_STORM];
+                Pin pins[]={
+                    {.52f,.17f,.32f,.25f,-.42f,-.84f,0,.14f,0,0},
+                    {.51f,.42f,.52f,.35f,(x-.5f)*1.45f,-1.23f,0,.10f,0,0},
+                    {.32f,.21f,.24f,.24f,wind,-.33f,0,.29f,1,1},
+                    {.77f,.60f,.28f,.37f,-wind,.67f,0,.58f,0,2},
+                    {.24f,.82f,.29f,.28f,wind*1.5f,.44f,0,.68f,1,2}};
+                for (unsigned k=0;k<sizeof pins/sizeof *pins;k++) weigh(n,&pins[k],x,y,l->w,l->h);
+            } else if (id >= RIG_FLAME)
                 prop_node(n, id, x, y, l->w, l->h);
             else if (!id) {
                 for (unsigned k = 0; k < sizeof title / sizeof title[0]; k++)

@@ -130,10 +130,13 @@ static int load(int i) {
         IWICFormatConverter_GetSize(cv, &w, &h);
         iw[i] = (float)w;
         ih[i] = (float)h;
-        if (i != ART_SILK && i != ART_IRON && i != ART_SWORDSMAN)
+        if (i != ART_SILK && i != ART_IRON && i != ART_SWORDSMAN && i != ART_ROSTER_BUSTS)
             hr = ID2D1RenderTarget_CreateBitmapFromWicBitmap(rt, (IWICBitmapSource *)cv, NULL, &images[i]);
         if (SUCCEEDED(hr) && i == ART_SWORDSMAN)
             hr = make_actor(0, (IWICBitmapSource *)cv, 0, 0, w, h, 1280);
+        if (i==ART_ROSTER_BUSTS)
+            for(int k=0;k<5 && SUCCEEDED(hr); k++)
+                hr=make_actor(RIG_STORM+k,(IWICBitmapSource*)cv,k*(w/5),0,w/5,h,360);
         if(i==ART_PROPS){
             const int tiles[]={0,1,3,5};
             for(int k=0;k<4 && SUCCEEDED(hr);k++){
@@ -441,12 +444,13 @@ void cover(int id, float x, float y, float w, float h, float bias, float a) {
     art(id, x, y, w, h, (iw[id] - sw) * .5f, (ih[id] - sh) * bias, sw, sh, a, 0);
 }
 void portrait(int id, float x, float y, float w, float h, float bias, float a) {
-    float cw = iw[1] / 5, sw = cw - 2, sh = ih[1], ratio = w / h;
+    int sheet=id<5?ART_HEROES:ART_ROSTER_CARDS;
+    float cw = iw[sheet] / 5, sw = cw - 2, sh = ih[sheet], ratio = w / h;
     if (sw / sh > ratio)
         sw = sh * ratio;
     else
         sh = sw / ratio;
-    art(1, x, y, w, h, cw * id + (cw - sw) * .5f, (ih[1] - sh) * bias, sw, sh, a, 0);
+    art(sheet, x, y, w, h, cw * (id%5) + (cw - sw) * .5f, (ih[sheet] - sh) * bias, sw, sh, a, 0);
 }
 void sprite(int id, float x, float feet, float size, float a, int flip) {
     art(3, x - size * .5f, feet - size * .966f, size, size, (id % 6) * 256.f, (id / 6) * 256.f, 256, 256, a,
@@ -472,7 +476,7 @@ void invalidate_shroud(void) {
     fogrev = -1;
     fogSource = NULL;
 }
-void shroud(float x, float y, float w, float h, const unsigned char *light, int cols, int rows, int rev) {
+void shroud(float x, float y, float w, float h, const unsigned char *light, int cols, int rows, int rev,float opacity) {
     if (!fog || fogrev != rev || fogSource != light) {
         UINT32 data[8192];
         if (cols * rows > 8192)
@@ -492,7 +496,7 @@ void shroud(float x, float y, float w, float h, const unsigned char *light, int 
         fogSource = light;
     }
     D2D1_RECT_F dst = {x, y, x + w, y + h};
-    ID2D1RenderTarget_DrawBitmap(rt, fog, &dst, 1, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, NULL);
+    ID2D1RenderTarget_DrawBitmap(rt, fog, &dst, opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, NULL);
 }
 uint32_t draw_region_hash(int x,int y,int w,int h){
     if(!canvas || w<1 || h<1 || x<0 || y<0 || x+w>W || y+h>H)return 0;

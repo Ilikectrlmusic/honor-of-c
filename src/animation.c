@@ -1,6 +1,7 @@
 #include "animation.h"
 #include "draw.h"
 #include "motion_data.h"
+#include "roster_motion.h"
 #include <math.h>
 
 #define PI 3.14159265f
@@ -21,17 +22,20 @@ static float seed(int i) {
     return ((n >> 22) ^ n) / 4294967296.f;
 }
 
+static int sheet_for(int m){return m<9?ART_MOTION0+m/3:ART_MOTION3+(m-9)/3;}
+static int height_for(int m){return m<9?motionHeight[m]:extraHeight[m-9];}
+static int pivot_for(int m,int frame){return m<9?motionPivot[m][frame]:extraPivot[m-9][frame];}
 void motion_frame(int model, int team, int row, int column, int facing, V feet, float height, float opacity) {
     int index = row * 6 + column;
-    float scale = height * .94f / motionHeight[model];
-    int pivot = motionPivot[model][index], flip = facing < 0;
+    float scale = height * .94f / height_for(model);
+    int pivot = pivot_for(model,index), flip = facing < 0;
     float x = feet.x - (flip ? 160 - pivot : pivot) * scale, y = feet.y - 157 * scale;
     int fr = (model % 3) * 6 + ((team == 1 && model != 8) ? 3 : 0) + row;
-    art(ART_MOTION0 + model / 3, x, y, 160 * scale, 160 * scale, 160.f * column, 160.f * fr, 160, 160,
+    art(sheet_for(model), x, y, 160 * scale, 160 * scale, 160.f * column, 160.f * fr, 160, 160,
         opacity, flip);
 }
 void motion_actor(const Unit *u, V feet, float h, float alpha) {
-    int model = u->kind == HERO     ? u->role
+    int model = u->kind == HERO     ? (u->role<5?u->role:u->role+4)
                 : u->kind == MELEE  ? 5
                 : u->kind == RANGED ? 6
                 : u->kind == SIEGE  ? 7
@@ -64,13 +68,13 @@ void motion_actor(const Unit *u, V feet, float h, float alpha) {
         /* Keep the authored upper-body swing (including the weapon and its
            contact frame). Flex the same painting below the knees instead of
            cutting in legs from a differently poised sprite. */
-        float scale = h*.94f/motionHeight[model];
-        int pivot = motionPivot[model][r*6+f], flip = dir < 0;
+        float scale = h*.94f/height_for(model);
+        int pivot = pivot_for(model,r*6+f), flip = dir < 0;
         float x = feet.x-(flip?160-pivot:pivot)*scale, y=feet.y-157*scale;
         float sx=160.f*f, sy=160.f*((model%3)*6+(u->team==1?3:0)+r);
-        float knee=157.f-motionHeight[model]*.32f;
+        float knee=157.f-height_for(model)*.32f;
         float gait=sinf(TAU*u->stride);
-        int atlas=ART_MOTION0+model/3;
+        int atlas=sheet_for(model);
         art(atlas,x,y,160*scale,knee*scale,sx,sy,160,knee,alpha,flip);
         for(int j=0;j<8;j++){
             float a=knee+(160-knee)*j/8, b=knee+(160-knee)*(j+1)/8;
@@ -153,11 +157,112 @@ void paint_flame_wave(const Shot *s, V p, float z) {
         oval(spark.x, spark.y, (2.6f - 1.6f * w) * z, (2.6f - 1.6f * w) * z, 0xffc276, (1 - w) * alpha, 1, 0);
     }
 }
+/* Draw in the projectile's own basis, so even a vertical shot keeps its
+   arrowhead, crest or brush nib pointed along the real swept collision. */
+void paint_roster_shot(int role,const Shot *s,V p,float z) {
+    V d=mul(norm(s->v),z), n=vec(-d.y,d.x);
+    float flight=dist(s->start,s->p);
+    uint32_t c=s->color;
+    if(role==5){
+        V last=add(p,mul(d,9));
+        for(int j=0;j<6;j++){
+            V tip=add(sub(p,mul(d,j*7.f)),mul(n,sinf(j*3.5f+flight*.07f)*3.5f));
+            line(last.x,last.y,tip.x,tip.y,c,.76f,5*z);
+            line(last.x,last.y,tip.x,tip.y,0xeceaff,.97f,1.5f*z);last=tip;
+        }
+    } else if(role==6){
+        for(int j=0;j<2;j++){
+            V last=p;
+            for(int k=0;k<=12;k++){
+                float a=(k-6)*.19f;
+                V pt=add(p,add(mul(d,cosf(a)*12-11*j),mul(n,sinf(a)*(23-j*4))));
+                if(k)line(last.x,last.y,pt.x,pt.y,j?c:0xc8fff3,.86f,(j?1.6f:3)*z);
+                last=pt;
+            }
+        }
+    } else if(role==7){
+        glow(p.x,p.y,17*z,15*z,0xff8b38,.84f);
+        oval(p.x,p.y,8*z,8*z,0x92411b,1,1,0);
+        oval(p.x,p.y,7*z,7*z,0xffca7a,.98f,0,2*z);
+        for(int k=0;k<6;k++){
+            V v=add(sub(p,mul(d,8+5*k)),mul(n,sinf(k*2+flight*.07f)*4));
+            oval(v.x,v.y,(3-k*.32f)*z,(3-k*.32f)*z,0xffa942,1-k*.12f,1,0);
+        }
+    } else if(role==8){
+        V tail=sub(p,mul(d,25)), l=add(sub(p,mul(d,9)),mul(n,4)),r=sub(sub(p,mul(d,9)),mul(n,4));
+        line(tail.x,tail.y,p.x,p.y,c,.88f,2*z);
+        float q[]={p.x,p.y,l.x,l.y,r.x,r.y};poly(q,3,0xe5faff,1);
+    } else {
+        V last=add(p,mul(d,6));
+        for(int k=0;k<12;k++){
+            V tip=add(sub(p,mul(d,2.8f*k)),mul(n,sinf(flight*.045f+k*.58f)*k*.55f));
+            float width=(1+6*sinf((k+1)*PI/13))*z;
+            line(last.x,last.y,tip.x,tip.y,0xc9d9ca,.85f,width+2*z);
+            line(last.x,last.y,tip.x,tip.y,0x233536,1,width);last=tip;
+        }
+    }
+}
 void paint_ultimate(const Fx *f, V a, V b, float z, int front) {
     float t = sat(1 - f->life / f->total), r = f->size * z;
     int cast = f->kind == FX_ULT_CAST;
     uint32_t col = f->color, team = teamColor[f->team];
-    if (f->n == 0) { // Vermilion: overhead draw, then a travelling fire crescent.
+    if (f->n >= 5) {
+        if(!front) {
+            if(cast) rune(a,r,team,.66f);
+            float radius=r*(cast?.84f+.16f*t:.23f+.79f*ease(t));
+            oval(a.x,a.y,radius,radius*.84f,col,cast?.35f+.35f*t:(1-t)*.78f,0,(cast?1.6f:4.2f)*z);
+            if(!cast) glow(a.x,a.y,r*.86f,r*.65f,col,(1-t)*.37f);
+            return;
+        }
+        float energy=cast?.24f+t*.55f:fade(t,.18f);
+        if(f->n==5){
+            for(int j=0;j<3;j++){
+                V last=a;
+                for(int k=1;k<=5;k++){
+                    V n={a.x+((j-1)*.17f*k+(k%2?.17f:-.12f))*r*(cast?.52f:1),
+                         a.y-(k*.29f*r)*(cast?t:1-.33f*t)};
+                    line(last.x,last.y,n.x,n.y,col,energy*.6f,(cast?2:7)*z);
+                    line(last.x,last.y,n.x,n.y,0xfaf6ff,energy,(cast?1:2.4f)*z);last=n;
+                }
+            }
+        } else if(f->n==6){
+            for(int j=0;j<3;j++){
+                float rad=r*(.42f+.24f*j),phase=t*1.65f+j*.43f;
+                V prev=a;
+                for(int k=0;k<16;k++){
+                    float ang=phase+k*.183f;
+                    V n={a.x+cosf(ang)*rad,a.y+sinf(ang)*rad*.58f-(cast?t:1-t)*r*.22f};
+                    if(k)line(prev.x,prev.y,n.x,n.y,k>10?0xdbfff1:col,energy,(2+2*sinf(k*3.14f/16))*z);
+                    prev=n;
+                }
+            }
+        } else if(f->n==7){
+            if(cast){
+                V n={a.x+(1-t)*r*.50f,a.y-r*(1-t*t)*1.6f};
+                line(n.x,n.y,n.x+13*z,n.y-36*z,0xff7d32,energy,6*z);
+                glow(n.x,n.y,14*z,18*z,0xffe696,energy);glint(n,8*z,0xffd576,energy);
+            }else{scatter(a,r,t,16,0xff9b36,z);glint(a,(1-t)*r*.56f,0xffdd8c,energy);}
+        } else if(f->n==8){
+            for(int j=0;j<8;j++){
+                float ang=TAU*j/8, s=cast?.20f+.40f*t:.5f+.45f*ease(t);
+                V tip={a.x+cosf(ang)*r*s,a.y+sinf(ang)*r*s*.76f-9*z};
+                float dx=cosf(ang),dy=sinf(ang)*.76f;
+                float q[]={a.x,a.y, a.x+dx*r*s*.55f-dy*7*z,a.y+dy*r*s*.55f+dx*7*z,
+                           tip.x,tip.y,a.x+dx*r*s*.55f+dy*6*z,a.y+dy*r*s*.55f-dx*6*z};
+                poly(q,4,col,energy*.75f);line(a.x,a.y,tip.x,tip.y,0xecffff,energy,1.5f*z);
+            }
+        } else {
+            V prev=a;
+            for(int j=0;j<22;j++){
+                float k=j/21.f,ang=k*5.8f+t*2.2f,rad=r*(.25f+.58f*k)*(cast?.65f+t*.35f:1);
+                V n={a.x+cosf(ang)*rad,a.y+sinf(ang)*rad*.68f};
+                if(j){line(prev.x,prev.y,n.x,n.y,0xd3e8cd,.8f*energy,(2+11*sinf(k*3.14f))*z);
+                      line(prev.x,prev.y,n.x,n.y,0x182b33,energy,(1+8*sinf(k*3.14f))*z);}
+                prev=n;
+            }
+            if(!cast) scatter(a,r,t,9,0x668783,z);
+        }
+    } else if (f->n == 0) { // Vermilion: overhead draw, then a travelling fire crescent.
         float ang = atan2f(b.y - a.y, b.x - a.x);
         if (cast && front) {
             V hand = {a.x + cosf(ang) * 19 * z, a.y - 54 * z + sinf(ang) * 15 * z};

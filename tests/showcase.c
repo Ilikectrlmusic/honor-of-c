@@ -84,15 +84,15 @@ int main(int argc, char **argv) {
     CreateDirectoryW(L"build\\gallery", NULL);
     Game *g = &app.g;
     Unit *p = &g->u[0], *m = &g->u[24], *v = &g->u[6];
-    for (int frame = 0; frame < (ceremony ? 18 : portraits ? 25 : observer ? 13 : SECS) * 20; frame++) {
+    for (int frame = 0; frame < (ceremony ? 28 : portraits ? 25 : observer ? 13 : SECS) * 20; frame++) {
         if(ceremony){
             if(!frame)tap(VK_RETURN);
             if(frame==4)tap('2');
             if(frame==16)tap('4');
             if(frame==30){app.mx=1060;app.my=640;ui_click(0);assert(app.screen==VERSUS);}
-            if(frame==109)assert(app.screen==MATCH && p->role==3);
-            if(frame==130)last_hit(0);
-            if(frame==240){ui_start(991);last_hit(1);}
+            if(frame==109)assert(app.screen==OPENING && !alive(p));
+            if(frame==312){assert(app.screen==MATCH && p->role==3 && g->waves==1);last_hit(0);}
+            if(frame==432){ui_start(991);last_hit(1);}
         } else if (observer) {
             if (!frame) {
                 ui_start(151);
@@ -192,10 +192,13 @@ int main(int argc, char **argv) {
             return 4;
         if(ceremony) {
             if(frame==70)still(L"versus");
-            if(frame==153)still(L"core-charge");
-            if(frame==162)still(L"core-break");
-            if(frame==220)still(L"victory-crest");
-            if(frame==332)still(L"defeat-crest");
+            if(frame==115)still(L"intro-wide");
+            if(frame==150)still(L"intro-approach");
+            if(frame==178)still(L"intro-spawn");
+            if(frame==335)still(L"core-charge");
+            if(frame==344)still(L"core-break");
+            if(frame==402)still(L"victory-crest");
+            if(frame==524)still(L"defeat-crest");
         } else if (!portraits && !observer) {
             if (frame == 131)
                 still(L"fountain-spawn");

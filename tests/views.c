@@ -69,7 +69,7 @@ static void layer_check(void) {
     printf(
         "Title: %d stationary scenery pixels, %d revealed original plate pixels, %d moving subject pixels.\n",
         fixed, revealed, moving);
-    for (int role = 0; role < 5; role++) {
+    for (int role = 0; role < HERO_COUNT; role++) {
         for (int frame = 0; frame < 2; frame++) {
             draw_begin();
             cursor_clip(840, 98, 390, 493);
@@ -273,6 +273,13 @@ static void ceremony_checks(void) {
     assert(cue_energy() == 0);
     tap_key('3');
     assert(app.selected == 2 && cue_energy() > 100000);
+    for(int role=5;role<HERO_COUNT;role++){
+        audio_clear();tap_key(role==9?'0':'1'+role);
+        assert(app.selected==role && cue_energy()>100000);
+    }
+    tap_key(VK_UP);assert(app.selected==4);
+    tap_key(VK_DOWN);assert(app.selected==9);
+    tap_key('3');
     tap_key('M');
     tap_key(VK_RIGHT);
     assert(app.selected == 3 && cue_energy() == 0);
@@ -311,6 +318,17 @@ static void ceremony_checks(void) {
                 pixels += change(before[y * W + x], after[y * W + x]) > 12;
     assert(pixels > 25);
     ticks(125);
+    assert(app.screen == OPENING && app.zoom < .4f && app.g.awaitingSpawn && app.g.time == 0);
+    for (int i = 0; i < 10; i++)
+        assert(!alive(&app.g.u[i]));
+    float z = app.zoom;
+    for (int i = 0; i < 184; i++) {
+        ui_tick(1.f / 60);
+        assert(app.zoom >= z - .0001f && app.zoom <= .951f);
+        z = app.zoom;
+    }
+    assert(app.screen == OPENING);
+    ticks(6);
     assert(app.screen == MATCH && app.g.time < .1f && !app.held['D']);
     for (int team = 0; team < 2; team++) {
         app.selected = 3;
@@ -359,6 +377,63 @@ static void ceremony_checks(void) {
     puts("Ceremonies: audible mouse/key selections and mute; shuffled real lineups, live gold rim, frozen "
          "intro; both real core kills, fracture, delayed crest and continue passed.");
 }
+static void training_checks(void) {
+    ui_reset();
+    tap_key(VK_RETURN);
+    tap_key('4');
+    app.mx = 840;
+    app.my = 643;
+    ui_click(0);
+    Game *g = &app.g;
+    Unit *p = &g->u[0], *dummy = &g->u[5];
+    assert(app.screen == TRAINING && g->training && p->role == 3 && dummy->team == 1);
+    int count = 0, beams = 0;
+    for (int i = 0; i < MAXU; i++)
+        count += alive(&g->u[i]);
+    for (int i = 0; i < MAXFX; i++)
+        beams += g->fx[i].live && g->fx[i].kind == FX_ARRIVAL && g->fx[i].anchor == 0;
+    assert(count == 2 && beams == 1);
+    ticks(18);
+    ui_draw();
+    capture(before);
+    assert(draw_save_bmp(L"build/gallery/practice-spawn.bmp"));
+    V start = p->pos, fixed = dummy->pos;
+    ui_key('D', 1);
+    ticks(20);
+    ui_key('D', 0);
+    assert(p->pos.x > start.x + 20);
+    app.mx = fixed.x;
+    app.my = fixed.y - 20;
+    ui_click(1);
+    ticks(240);
+    assert(g->practiceHits > 0 && dist(fixed, dummy->pos) < .001f);
+    dummy->hp = 1;
+    ui_key('R', 1);
+    ticks(145);
+    ui_key('R', 0);
+    assert(g->castCount[2] >= 2 && p->cd[2] == 0 && alive(dummy) && !g->cardCount);
+    tap_key('Q');
+    ticks(65);
+    tap_key('Q');
+    ticks(1);
+    assert(g->castCount[0] == 2 && !p->cd[0]);
+    ui_draw();
+    capture(after);
+    assert(draw_save_bmp(L"build/gallery/practice-combat.bmp"));
+    int gold = p->gold;
+    ticks(450);
+    assert(!g->waves && p->gold == gold && g->winner < 0 && !dummy->kills);
+    tap_key('T');
+    assert(g->practiceHits == 0 && !g->practiceDamage && dist(start, p->pos) < .001f);
+    tap_key('0');
+    assert(p->role == 9 && app.screen == TRAINING);
+    tap_key(VK_ESCAPE);
+    assert(app.screen == DRAFT && app.selected == 9);
+    tap_key(VK_RETURN);
+    assert(app.screen == VERSUS && !g->training);
+    puts("Playable courtyard: real inputs, hero changes, repeated attacks and ultimates, immortal fixed red "
+         "dummy, spawn beam, reset and match isolation passed.");
+}
 int main(void) {
     assert(SUCCEEDED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED)));
     CreateDirectoryW(L"build/gallery", NULL);
@@ -378,6 +453,7 @@ int main(void) {
     spectator_check();
     garrison_view();
     ceremony_checks();
+    training_checks();
     draw_close();
     CoUninitialize();
     return 0;

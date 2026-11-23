@@ -3,6 +3,7 @@
 #include "audio.h"
 #include "animation.h"
 #include "domain.h"
+#include "living.h"
 #include "presentation.h"
 #include <math.h>
 #include <stdio.h>
@@ -10,11 +11,8 @@
 #include <stdarg.h>
 #include <stdlib.h>
 App app;
-static Game practice;
-/* Only the draft-room stage temporarily changes the source for battlefield(). */
-static Game *renderGame = &app.g;
 #define A app
-#define G (*renderGame)
+#define G app.g
 #define P (G.u[0])
 #define INK 0x0b1b20
 #define DEEP 0x071318
@@ -69,7 +67,7 @@ typedef struct { float x,y,w,h; } Area;
 static int inside(Area a){return hit(a.x,a.y,a.w,a.h);}
 static const Area homeChoose={69,439,213,52}, homeGuide={296,439,146,52};
 static const Area guideDone = {902, 594, 148, 38};
-static Area card_area(int i){return (Area){38+i*164,169,156,235};}
+static Area card_area(int i){return (Area){38+(i%5)*164,153+(i/5)*131,156,121};}
 static Area difficulty_area(int i){return (Area){143+i*94,536,84,33};}
 static void mast(void) {
     crest(65,46,.78f,GOLD);
@@ -142,6 +140,11 @@ static void glyph(int type, float x, float y, float sz, uint32_t c) {
     }
 }
 static void skillart(int role, int slot, float x, float y, float w, float h, float alpha) {
+    if(role>=5){
+        float sw=fminf(158,158*w/h),sh=fminf(158,158*h/w);
+        art(ART_ROSTER_SKILLS,x,y,w,h,(role-5)*160+(160-sw)/2,slot*160+(160-sh)/2,sw,sh,alpha,0);
+        return;
+    }
     float sy = (float[]){0, 160, 310}[slot];
     float sh = slot == 0 ? 159 : slot == 1 ? 149 : 169;
     float sw = 156, ratio = w / h;
@@ -172,9 +175,10 @@ static void showcase(int role) {
     uint32_t color = h->color;
     cursor_clip(x, y, w, height);
     domain_draw(role, x, y, w, height, t);
-    float ph = 484,
-          pw = ph * (float[]){634.f / 822, 634.f / 822, 638.f / 822, 759.f / 1024, 771.f / 1024}[role];
-    living_art(role + 1, x + (w - pw) / 2 + settle * 7, y + height - ph + settle * 2, pw, ph, t,
+    float ph = role<5?484:w*664/400, pw=role<5?
+          ph * (float[]){634.f / 822, 634.f / 822, 638.f / 822, 759.f / 1024, 771.f / 1024}[role]:w;
+    living_art(role<5?role+1:RIG_STORM+role-5, x + (w - pw) / 2 + settle * 7,
+               y + (role<5?height-ph:16) + settle * 2, pw, ph, t,
                1 - settle * .12f);
     gradient(x, y + height - 113, w, 113, DEEP, 0, DEEP, .96f, 1);
     box(x + 19, y + height - 63, 24, 2, color, .95f);
@@ -194,13 +198,16 @@ static void draft(void) {
     txt(L"战前集结", 37, 89, 460, 64, 45, PAPER, F_SERIF, 0);
     const HeroDef *h = &heroes[A.selected];
     showcase(A.selected);
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < HERO_COUNT; i++) {
         Area r = card_area(i);
         float x = r.x, y = r.y, w = r.w, b = y + r.h;
         int selected = i == A.selected, over = inside(r);
         uint32_t c = heroes[i].color;
-        portrait(i, x, y, w, r.h, .22f, selected || over ? 1 : .74f);
-        gradient(x, b - 125, w, 125, DEEP, 0, DEEP, .98f, 1);
+        /* The original five paintings have a much taller headpiece than the
+           new busts: frame their eyes, not a uniform sliver of each forehead. */
+        static const float focus[HERO_COUNT]={.35f,.39f,.30f,.23f,.38f,.08f,.08f,.08f,.08f,.08f};
+        portrait(i, x, y, w, r.h, focus[i], selected || over ? 1 : .88f);
+        gradient(x, b - 56, w, 56, DEEP, 0, DEEP, .96f, 1);
         frame(x, y, w, r.h,
               selected ? GOLD
               : over   ? PAPER
@@ -208,12 +215,11 @@ static void draft(void) {
               selected ? 1 : .74f, selected ? 2.5f : 1);
         if (selected) {
             box(x, y, w, 3, GOLD, 1);
-            chip(x + 8, y + 9, 50, L"已选择", GOLD);
+            chip(x + 5, y + 5, 48, L"已选择", GOLD);
         } else
-            fmt(x + 10, y + 8, 44, 23, 12, PAPER, F_NUM, 0, L"0%d", i + 1);
-        txt(heroes[i].name, x + 10, b - 77, w - 20, 44, 29, PAPER, F_SERIF, 0);
-        txt(heroes[i].role, x + 11, b - 33, 43, 23, 13, c, F_BOLD, 0);
-        txt(heroes[i].tag, x + 54, b - 33, w - 64, 23, 12, 0xd0d8ca, F_UI, 2);
+            fmt(x + 7, y + 3, 35, 19, 12, PAPER, F_NUM, 0, L"%02d", i + 1);
+        txt(heroes[i].name, x + 9, b - 35, w - 58, 31, 22, PAPER, F_SERIF, 0);
+        txt(heroes[i].role, x + w - 50, b - 28, 40, 23, 13, c, F_BOLD, 2);
     }
     txt(h->bio, 39, 419, 801, 34, 19, PAPER, F_SERIF, 0);
     for (int j = 0; j < 3; j++) {
@@ -233,8 +239,8 @@ static void draft(void) {
     }
     rule(38, 605, 1201);
     button(62, 621, 133, 48, L"←  返回", 0);
-    txt(L"1–5  选英雄     ·     Enter  出战", 222, 625, 506, 43, 14, MUTED, F_UI, 0);
-    button(747, 621, 204, 48, L"动作试演   V", 0);
+    txt(L"1–9 / 0  选英雄     ·     Enter  出战", 222, 625, 506, 43, 14, MUTED, F_UI, 0);
+    button(747, 621, 204, 48, L"练习   V", 0);
     button(977, 615, 243, 59, L"进入峡谷     →", 1);
 }
 static V world(V p) {
@@ -386,10 +392,13 @@ static void world_fx(int layer) {
 static void battlefield(void) {
     float z = A.zoom;
     V org = world(vec(0, 0));
-    art(ART_MAP, org.x, org.y, WW * z, WH * z, 0, 0, 1464, 1074, 1, 0);
+    if(A.screen==TRAINING)art(ART_DOJO,0,0,1280,720,0,0,1536,1024,1,0);
+    else art(ART_MAP, org.x, org.y, WW * z, WH * z, 0, 0, 1464, 1074, 1, 0);
     box(0, 0, 1280, 720, 0x10282a, .10f);
-    int cinematic = A.screen == FINALE || A.screen == REPORT;
-    if (!cinematic) shroud(org.x, org.y, WW * z, WH * z, G.sight[0], GW, GH, G.sightFrame);
+    int cinematic = A.screen == FINALE || A.screen == REPORT || A.screen == OPENING;
+    if (!cinematic && !G.training) shroud(org.x, org.y, WW * z, WH * z, G.sight[0], GW, GH, G.sightFrame,1);
+    if(A.screen==OPENING && A.sceneTime>2)
+        shroud(org.x,org.y,WW*z,WH*z,G.sight[0],GW,GH,G.sightFrame,clampf((A.sceneTime-2)/.95f,0,1));
     int order[MAXU], n = 0;
     for (int i = 0; i < MAXU; i++) {
         Unit *u = &G.u[i];
@@ -484,6 +493,10 @@ static void battlefield(void) {
             lift = from + (unitSize(end) * .35f - from) * travel;
         }
         p.y -= lift * z;
+        if(s->kind!=0 && G.u[s->owner].kind==HERO && G.u[s->owner].role>=5){
+            paint_roster_shot(G.u[s->owner].role,s,p,z);
+            continue;
+        }
         V v = norm(s->v);
         float sz = (s->kind == 0 ? s->radius : s->radius > 40 ? 16 : 8) * z;
         line(p.x - v.x * sz * 4, p.y - v.y * sz * 4, p.x, p.y, s->color, .57f, sz * 1.23f);
@@ -493,7 +506,7 @@ static void battlefield(void) {
     world_fx(1);
     /* Only the world is dimmed. Floating readouts, team pings, health bars
        and the screen HUD/minimap are painted AFTER the observer veil. */
-    if (renderGame == &A.g && A.deathShade > 0)
+    if (A.deathShade > 0)
         box(0, 0, 1280, 720, 0x0a1322, A.deathShade);
     if (G.rallyTime > 0) {
         V p = world(G.rally);
@@ -532,8 +545,8 @@ static void battlefield(void) {
         box(p.x - bw * .5f - 1, by - 1, bw + 2, bh + 2, DEEP, .97f);
         box(p.x - bw * .5f, by, bw * clampf(u->hp / u->maxhp, 0, 1), bh, id == 0 ? 0xb8ef86 : c, 1);
         if (hero) {
-            if (id == 0 || A.hoverUnit == id) {
-                txt(id == 0 ? L"你" : heroes[u->role].name, p.x - 49, by - 20, 98, 18, 12, PAPER, F_BOLD, 1);
+            if (id == 0 || A.hoverUnit == id || G.training) {
+                txt(id == 0 ? L"你" : G.training ? L"陪练靶" : heroes[u->role].name, p.x - 49, by - 20, 98, 18, 12, PAPER, F_BOLD, 1);
             }
             box(p.x - bw * .5f - 14, by - 6, 14, 15, DEEP, .95f);
             fmt(p.x - bw * .5f - 14, by - 6, 14, 15, 10, id == 0 ? GOLD : c, F_NUM, 1, L"%d", u->level);
@@ -565,7 +578,7 @@ static void minimap(void) {
     box(x - 5, y - 5, w + 10, h + 10, DEEP, .96f);
     cover(ART_MAP, x, y, w, h, .5f, 1);
     box(x, y, w, h, DEEP, .16f);
-    shroud(x, y, w, h, G.sight[0], GW, GH, G.sightFrame);
+    shroud(x, y, w, h, G.sight[0], GW, GH, G.sightFrame,1);
     frame(x - 1, y - 1, w + 2, h + 2, GOLD, .65f, 1);
     for (int phase = 0; phase < 2; phase++)
         for (int i = phase ? 0 : 10; i < (phase ? 10 : MAXU); i++) {
@@ -774,107 +787,62 @@ static void modal(float x, float y, float w, float h, const wchar_t *eyebrow, co
     txt(eyebrow, x + 31, y + 23, w - 64, 20, 12, GOLD, F_NUM, 0);
     txt(title, x + 29, y + 46, w - 58, 57, 36, PAPER, F_SERIF, 0);
 }
-/* An isolated real simulation lets the player inspect contact and release timing
-   without a second set of preview-only hero animations or affecting a match. */
-static const V rehearsalStart = {1250, 1925};
-static void begin_rehearsal(int hero) {
-    select_role(hero);
+static void training_start(int role) {
+    select_role(role);
+    audio_clear();
     invalidate_shroud();
-    game_init(&practice, hero, 1, 4861);
-    for (int i = 1; i < MAXU; i++)
-        if (i != 5)
-            practice.u[i].used = 0;
-    Unit *u = &practice.u[0], *target = &practice.u[5];
-    u->pos = rehearsalStart;
-    u->atk = .9f;
-    target->pos = add(rehearsalStart, vec(138 + (u->reach > 150 ? 178 : 64), 0));
-    target->role = 3;
-    target->maxhp = target->hp = 99999;
-    target->stun = 999;
-    target->dir = -1;
-    target->grace = 0;
-    practice.wave = 999;
-    practice.soundN = 0; /* no match-opening VO in rehearsal */
-    practice.sightTimer = 0;
-    game_order(&practice, add(u->pos, vec(138, 0)), -1, 0);
-    A.overlay = REHEARSAL;
+    game_training(&G, role);
+    A.practiceQueued = -1;
+    A.screen = TRAINING;
+    A.overlay = NONE;
+    A.cam = vec(640, 360);
+    A.zoom = 1;
+    A.pending = A.hoverUnit = -1;
+    A.deathShade = 0;
+    A.panConsumed = 0;
+    memset(A.held, 0, sizeof A.held);
 }
-static void rehearsal_tick(float dt, int audible) {
-    float t = practice.time;
-    if (t >= 4.8f) {
-        begin_rehearsal(A.selected);
-        t = 0;
-    }
-    if (t < .95f && t + dt >= .95f)
-        game_order(&practice, practice.u[5].pos, 5, 0);
-    if (t < 2.55f && t + dt >= 2.55f) {
-        V aim = practice.u[5].pos;
-        if (A.selected == 3 || A.selected == 4)
-            aim.x += 82;
-        game_cast(&practice, 0, 2, aim);
-    }
-    game_step(&practice, dt, (Input){0});
-    if (audible)
-        for (int i = 0; i < practice.soundN; i++)
-            audio_event(practice.sound[i]);
-    practice.soundN = 0;
+static void training_exit(void) {
+    A.screen = DRAFT;
+    A.overlay = NONE;
+    A.pending = A.hoverUnit = -1;
+    memset(A.held, 0, sizeof A.held);
+    audio_clear();
 }
-static void replay_ult(void) {
-    begin_rehearsal(A.selected);
-    for (int i = 0; i < 150; i++)
-        rehearsal_tick(1.f / 60, 0);
+static const Area practiceReset = {968, 22, 119, 38}, practiceLeave = {1099, 22, 156, 38};
+static Area trainingSlot(int i) {
+    return (Area){471 + i * 116, 632, 106, 65};
 }
-static void rehearsal_panel(void) {
-    const HeroDef *h = &heroes[A.selected];
-    float t = practice.time;
-    modal(112, 34, 1056, 650, L"M O T I O N   S T U D I E S      /      演 武 场", L"动作试演");
-    for (int j = 0; j < 5; j++)
-        button(596 + j * 108, 84, 99, 37, heroes[j].name, j == A.selected);
-    V cam = A.cam;
-    float zoom = A.zoom;
-    int hover = A.hoverUnit;
-    cursor_clip(143, 143, 994, 305);
-    renderGame = &practice;
-    A.zoom = 1.20f;
-    A.cam = add(rehearsalStart, vec((640 - 332) / A.zoom, (360 - 338) / A.zoom));
-    A.hoverUnit = -1;
-    battlefield();
-    renderGame = &app.g;
-    A.cam = cam;
-    A.zoom = zoom;
-    A.hoverUnit = hover;
-    clip_end();
-    frame(143, 143, 994, 305, GOLD, .54f, 1);
-    box(157, 156, 194, 30, DEEP, .90f);
-    fmt(160, 156, 188, 30, 14, GOLD, F_BOLD, 1, L"%ls   /   %ls", h->name,
-        t < .95f    ? L"移动"
-        : t < 2.55f ? L"普通攻击"
-                    : h->skill[2]);
-    box(144, 444, 992 * clampf(t / 4.8f, 0, 1), 3, h->color, 1);
-    txt(L"兵线动作", 144, 458, 171, 31, 19, PAPER, F_SERIF, 0);
-    txt(L"每组左侧是移动，右侧是攻击", 332, 459, 805, 28, 13, MUTED, F_UI, 2);
-    for (int j = 0; j < 3; j++) {
-        float x = 143 + j * 335;
-        panel(x, 495, 324, 94);
-        txt(((const wchar_t *[]){L"近战兵", L"弩兵", L"攻城车"})[j], x + 14, 511, 99, 31, 17, PAPER, F_BOLD,
-            0);
-        txt(((const wchar_t *[]){L"持盾 · 前刺", L"抬弩 · 发射", L"转轮 · 后坐"})[j], x + 14, 548, 110, 23,
-            12, GOLD, F_UI, 0);
-        Unit demo = {0};
-        demo.kind = (int[]){MELEE, RANGED, SIEGE}[j];
-        demo.dir = demo.poseDir = 1;
-        demo.moving = 1;
-        demo.stride = fmodf(t * (1.8f - j * .25f), 1);
-        motion_actor(&demo, vec(x + 157, 580), 65, 1);
-        demo.moving = 0;
-        demo.pose = POSE_ATTACK;
-        demo.actionTime = .61f;
-        demo.anim = fmaxf(0, .61f - fmodf(t + j * .14f, 1.07f));
-        motion_actor(&demo, vec(x + 253, 580), 65, 1);
+static void training_hud(void) {
+    const HeroDef *h = &heroes[P.role];
+    gradient(0, 0, 1280, 105, DEEP, .87f, DEEP, 0, 1);
+    gradient(0, 589, 1280, 131, DEEP, 0, DEEP, .94f, 1);
+    txt(L"竹庭演武场", 28, 12, 255, 43, 28, PAPER, F_SERIF, 0);
+    txt(L"自由练习   /   技能无冷却", 31, 53, 262, 21, 14, GOLD, F_BOLD, 0);
+    button(practiceReset.x, practiceReset.y, practiceReset.w, practiceReset.h, L"重置   T", 0);
+    button(practiceLeave.x, practiceLeave.y, practiceLeave.w, practiceLeave.h, L"返回选将   Esc", 0);
+    panel(24, 633, 297, 62);
+    txt(h->name, 38, 637, 100, 29, 21, PAPER, F_SERIF, 0);
+    txt(L"1–9 / 0  切换英雄", 40, 669, 159, 19, 13, GOLD, F_BOLD, 0);
+    txt(L"WASD  移动", 168, 640, 143, 22, 14, PAPER, F_UI, 0);
+    txt(L"空格 / 右键  普攻", 168, 664, 144, 22, 14, PAPER, F_UI, 0);
+    for (int i = 0; i < 3; i++) {
+        Area r = trainingSlot(i);
+        panel(r.x, r.y, r.w, r.h);
+        skillart(P.role, i, r.x + 4, r.y + 3, r.w - 8, 34, 1);
+        if (A.pending == i)
+            frame(r.x, r.y, r.w, r.h, GOLD, 1, 2);
+        fmt(r.x, r.y + 37, r.w, 27, 14, PAPER, F_BOLD, 1, L"%lc  %ls", L"QER"[i], h->skill[i]);
+        if(inside(r)){
+            float tw=fminf(870,text_width(h->desc[i],15,F_UI)+32);
+            panel(640-tw*.5f,591,tw,31);
+            txt(h->desc[i],640-tw*.5f,591,tw,31,15,PAPER,F_UI,1);
+        }
     }
-    txt(L"1–5 切换英雄    ·    自动循环", 144, 615, 449, 42, 14, MUTED, F_UI, 0);
-    button(682, 615, 213, 43, L"重放大招   R", 0);
-    button(915, 615, 222, 43, L"返回选将   Esc", 1);
+    panel(943, 633, 312, 62);
+    fmt(954, 637, 287, 26, 16, PAPER, F_BOLD, 1, L"累计伤害  %.0f     命中  %d", G.practiceDamage,
+        G.practiceHits);
+    fmt(954, 668, 287, 21, 13, GOLD, F_UI, 1, L"上次伤害  %.0f     /     靶子耗尽后回满", G.lastDamage);
 }
 static void guide(void) {
     modal(194, 66, 892, 586, L"F I E L D   M A N U A L", L"战场指南");
@@ -1012,10 +980,32 @@ static void aim_overlay(void) {
         range = i == 0 ? 198 : i == 1 ? 547 : 295;
         radius = i == 2 ? 128 : 0;
     }
+    if(r>=5){
+        range=i==0?480:i==2||r==9?470:r==8?156:0;
+        radius=i==1?(float[]){0,245,138,0,99}[r-5]:0;
+    }
+    if(i==1 && r==1) range=WIND_ARROW_RANGE;
+    if(i==1 && r==3) radius=AEGIS_RADIUS;
+    if(i==1 && r==5) radius=ARC_REACH;
+    if(i==1 && r==6){range=TIDE_ECHO_RANGE;radius=TIDE_ECHO_RADIUS;}
     V target = world(add(P.pos, mul(dir, fminf(range, dist(m, P.pos)))));
     uint32_t c = heroes[r].color;
+    if(i==1 && (r==3||r==6))
+        oval(pos.x,pos.y,(r==3?242:245)*z,(r==3?242:245)*z,JADE,.55f,0,1.5f);
+    if(i==1 && r==1){
+        V end=world(add(P.pos,mul(dir,130)));
+        oval(end.x,end.y,13*z,8*z,c,.85f,0,2*z);
+    }
     if (range > 0)
         oval(pos.x, pos.y, range * z, range * z, c, .37f, 0, 1);
+    if(r>=5 && i==2){
+        V centers[5];float rad;int n=hero_seals(r,P.pos,m,P.face,centers,&rad);
+        for(int j=0;j<n;j++){
+            V v=world(centers[j]);
+            oval(v.x,v.y,rad*z,rad*z,c,.06f,1,0);
+            oval(v.x,v.y,rad*z,rad*z,c,.77f,0,1.5f);
+        }
+    }
     if (radius > 0) {
         oval(target.x, target.y, radius * z, radius * z, c, .14f, 1, 0);
         oval(target.x, target.y, radius * z, radius * z, c, .85f, 0, 2);
@@ -1031,7 +1021,13 @@ void ui_draw(void) {
         draft();
     else if (A.screen == VERSUS)
         present_versus(&G,A.lineup,A.sceneTime);
-    else if (A.screen == FINALE || A.screen == REPORT) {
+    else if(A.screen==OPENING){
+        battlefield();
+        float fade=clampf(1-A.sceneTime/.32f,0,1);
+        if(fade>0)box(0,0,1280,720,DEEP,fade);
+    } else if(A.screen==TRAINING){
+        battlefield();if(A.pending>=0)aim_overlay();training_hud();
+    } else if (A.screen == FINALE || A.screen == REPORT) {
         battlefield();
         int losing = 1-G.winner;
         present_core(world(G.u[16+7*losing].pos), A.zoom, losing, A.sceneTime);
@@ -1043,9 +1039,7 @@ void ui_draw(void) {
             aim_overlay();
         hud();
     }
-    if (A.overlay == REHEARSAL)
-        rehearsal_panel();
-    else if (A.overlay == GUIDE)
+    if (A.overlay == GUIDE)
         guide();
     else if (A.overlay == SHOP)
         shop();
@@ -1065,13 +1059,14 @@ void ui_reset(void) {
     A.zoom = .95f;
     A.hoverUnit = A.pending = -1;
 }
-void ui_start(uint32_t seed) {
+static void prepare_session(uint32_t seed,int staged) {
     A.deathShade = 0;
     A.panConsumed = 0;
     A.sceneTime = 0;
     audio_clear();
     invalidate_shroud();
-    game_init(&G, A.selected, A.difficulty, seed);
+    if(staged)game_prepare_match(&G,A.selected,A.difficulty,seed);
+    else game_init(&G, A.selected, A.difficulty, seed);
     A.screen = MATCH;
     A.overlay = NONE;
     A.hoverUnit = A.pending = -1;
@@ -1080,10 +1075,11 @@ void ui_start(uint32_t seed) {
     camera(P.pos, -1);
     audio_event(S_UI);
 }
+void ui_start(uint32_t seed){prepare_session(seed,0);}
 /* Build the roster ONCE before dealing. A private PRNG shuffles display
    order without ever disturbing hero ids, lane AI or simulation randomness. */
 void ui_versus(uint32_t seed) {
-    ui_start(seed);
+    prepare_session(seed,1);
     A.screen = VERSUS;
     uint32_t state = seed ^ 0xb7943ad5u;
     for (int i = 0; i < 10; i++)
@@ -1144,6 +1140,11 @@ static void showguide(void) {
     A.overlay = GUIDE;
 }
 static void cast(int s) {
+    /* Buffer one aimed input in practice so a tap in the recovery frames of
+       the previous skill is not lost. Never cancel its release/contact frame. */
+    if(G.training && P.anim>0 && P.pose>=POSE_SKILL){
+        A.practiceQueued=s;A.practiceAim=mouseworld();A.pending=-1;return;
+    }
     if (!game_cast(&G, 0, s, mouseworld()) && alive(&P)) {
         if (P.stun > 0)
             game_notice(&G, L"受到控制，暂时无法施法");
@@ -1158,23 +1159,18 @@ void ui_click(int right) {
     if (A.mx < 0 || A.my < 0 || A.mx >= 1280 || A.my >= 720)
         return;
     if (A.screen == MATCH && G.winner>=0) enter_finale();
-    if (A.screen == VERSUS) return;
+    if (A.screen == VERSUS || A.screen==OPENING) return;
     if (A.screen == FINALE) {
         if(!right && A.sceneTime>=CONTINUE_AT) A.screen=REPORT;
         return;
     }
-    if (A.overlay == REHEARSAL) {
-        if (!right) {
-            if (hit(915, 615, 222, 43))
-                A.overlay = NONE;
-            else if (hit(682, 615, 213, 43))
-                replay_ult();
-            else
-                for (int j = 0; j < 5; j++)
-                    if (hit(596 + j * 108, 84, 99, 37))
-                        begin_rehearsal(j);
-        }
-        return;
+    if(A.screen==TRAINING){
+        if(!right && inside(practiceLeave)){training_exit();return;}
+        if(!right && inside(practiceReset)){training_start(A.selected);return;}
+        for(int i=0;i<3;i++)if(inside(trainingSlot(i))){if(!right)A.pending=i;return;}
+        if(A.pending>=0){if(right)A.pending=-1;else cast(A.pending);return;}
+        if(A.my<80 || A.my>625)return;
+        game_order(&G,mouseworld(),target_under(),!right);return;
     }
     if (A.overlay == GUIDE) {
         if (!right && inside(guideDone))
@@ -1247,7 +1243,7 @@ void ui_click(int right) {
     if (A.screen == DRAFT) {
         if (right)
             return;
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < HERO_COUNT; i++)
             if (inside(card_area(i))) {
                 select_role(i);
                 return;
@@ -1261,7 +1257,7 @@ void ui_click(int right) {
         if (hit(62, 621, 133, 48))
             A.screen = HOME;
         else if (hit(747, 621, 204, 48))
-            begin_rehearsal(A.selected);
+            training_start(A.selected);
         else if (hit(977, 615, 243, 59))
             ui_versus(GetTickCount());
         return;
@@ -1338,7 +1334,7 @@ void ui_key(int k, int down) {
         return;
     }
     if (A.screen == MATCH && G.winner>=0) enter_finale();
-    if(A.screen==VERSUS) return;
+    if(A.screen==VERSUS || A.screen==OPENING) return;
     if(A.screen==FINALE){
         if((k==VK_RETURN || k==VK_SPACE) && A.sceneTime>=CONTINUE_AT) A.screen=REPORT;
         return;
@@ -1349,13 +1345,11 @@ void ui_key(int k, int down) {
         if(A.screen!=REPORT)audio_clear();
         return;
     }
-    if (A.overlay == REHEARSAL) {
-        if (k == VK_ESCAPE || k == 'V')
-            A.overlay = NONE;
-        else if (k == 'R')
-            replay_ult();
-        else if (k >= '1' && k <= '5')
-            begin_rehearsal(k - '1');
+    if(A.screen==TRAINING){
+        if(k==VK_ESCAPE){if(A.pending>=0)A.pending=-1;else training_exit();}
+        else if(k=='T')training_start(A.selected);
+        else if(k>='0' && k<='9' && (k-'0'+9)%10!=A.selected)training_start((k-'0'+9)%10);
+        else if(k=='Q'||k=='E'||k=='R')cast(k=='Q'?0:k=='E'?1:2);
         return;
     }
     if (A.overlay == GUIDE) {
@@ -1394,14 +1388,16 @@ void ui_key(int k, int down) {
         return;
     }
     if (A.screen == DRAFT) {
-        if (k >= '1' && k <= '5')
-            select_role(k-'1');
+        if (k >= '0' && k <= '9')
+            select_role((k-'0'+9)%10);
         else if (k == 'V')
-            begin_rehearsal(A.selected);
+            training_start(A.selected);
         else if (k == VK_LEFT)
-            select_role((A.selected+4)%5);
+            select_role((A.selected+HERO_COUNT-1)%HERO_COUNT);
         else if (k == VK_RIGHT)
-            select_role((A.selected+1)%5);
+            select_role((A.selected+1)%HERO_COUNT);
+        else if (k == VK_UP || k == VK_DOWN)
+            select_role((A.selected+5)%HERO_COUNT);
         else if (k == VK_RETURN)
             ui_versus(GetTickCount());
         else if (k == VK_ESCAPE)
@@ -1440,6 +1436,7 @@ void ui_wheel(int d) {
     }
 }
 void ui_blur(void) {
+    A.practiceQueued = -1;
     A.panConsumed = 0;
     memset(A.held, 0, sizeof A.held);
     A.pending = -1;
@@ -1454,27 +1451,66 @@ void ui_tick(float dt) {
         if (old < .38f && A.sceneTime >= .38f)
             audio_event(S_VS);
         if (A.sceneTime >= VS_DURATION) {
+            A.screen = OPENING;
+            A.sceneTime = 0;
+            A.zoom = fminf(1280.f / WW, 720.f / WH);
+            A.cam = vec(WW * .5f, WH * .5f);
+            audio_event(VO_WELCOME);
+            memset(A.held, 0, sizeof A.held);
+        }
+        return;
+    }
+    if (A.screen == FINALE) {
+        finale_tick(dt);
+        return;
+    }
+    if (A.screen == OPENING) {
+        A.sceneTime += dt;
+        float k = clampf((A.sceneTime - .40f) / (OPENING_DURATION - .58f), 0, 1);
+        k = k * k * k * (k * (6 * k - 15) + 10);
+        float wide = fminf(1280.f / WW, 720.f / WH);
+        A.zoom = wide * powf(.95f / wide, k);
+        float hw = fminf(640 / A.zoom, WW * .5f), hh = fminf(360 / A.zoom, WH * .5f);
+        V center = vec(WW * .5f, WH * .5f), core = G.u[16].pos;
+        V aim = add(center, mul(sub(core, center), k));
+        A.cam = vec(clampf(aim.x, hw, WW - hw), clampf(aim.y, hh, WH - hh));
+        if (A.sceneTime >= OPENING_DURATION) {
+            game_deploy(&G);
             A.screen = MATCH;
+            A.zoom = .95f;
+            camera(P.pos, -1);
             A.sceneTime = 0;
             memset(A.held, 0, sizeof A.held);
         }
         return;
     }
-    if(A.screen==FINALE){finale_tick(dt);return;}
-    if (A.overlay == REHEARSAL) {
-        rehearsal_tick(dt, 1);
+    if ((A.screen != MATCH && A.screen != TRAINING) || A.overlay != NONE)
+        return;
+    if (G.winner >= 0) {
+        enter_finale();
         return;
     }
-    if (A.screen != MATCH || A.overlay != NONE)
-        return;
-    if(G.winner>=0){enter_finale();return;}
     int wasAlive = alive(&P), serial = P.serial;
     int w = A.held['W'] && !(A.panConsumed & 1), a = A.held['A'] && !(A.panConsumed & 2),
         s = A.held['S'] && !(A.panConsumed & 4), d = A.held['D'] && !(A.panConsumed & 8);
     Input in = {(float)(d - a), (float)(s - w), A.held[VK_SPACE]};
     V old = P.pos;
+    if (G.training && (P.anim <= 0 || P.pose < POSE_SKILL) && A.pending < 0) {
+        if (A.practiceQueued >= 0) {
+            game_cast(&G, 0, A.practiceQueued, A.practiceAim);
+            A.practiceQueued = -1;
+        } else
+            for (int i = 2; i >= 0; i--)
+                if (A.held[(int)"QER"[i]]) {
+                    cast(i);
+                    break;
+                }
+    }
     game_step(&G, dt, wasAlive ? in : (Input){0});
-    if(G.winner>=0){enter_finale();return;}
+    if (G.winner >= 0) {
+        enter_finale();
+        return;
+    }
     if (!alive(&P)) {
         A.pending = -1;
         A.deathShade = fminf(.41f, A.deathShade + dt * 1.85f);
@@ -1487,7 +1523,8 @@ void ui_tick(float dt) {
             A.panConsumed =
                 (A.held['W'] ? 1 : 0) | (A.held['A'] ? 2 : 0) | (A.held['S'] ? 4 : 0) | (A.held['D'] ? 8 : 0);
         }
-        camera(P.pos, !wasAlive || serial != P.serial || dist(old, P.pos) > 350 ? -1 : dt);
+        if (!G.training)
+            camera(P.pos, !wasAlive || serial != P.serial || dist(old, P.pos) > 350 ? -1 : dt);
     }
     A.hoverUnit = target_under();
     for (int i = 0; i < G.soundN; i++)

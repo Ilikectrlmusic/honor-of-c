@@ -66,8 +66,9 @@ static int prepare(void) {
     int ok = pcm_resource(MUSIC, 390, 2);
     for (int i = VO_COUNTDOWN; i < SOUND_COUNT; i++)
         ok &= pcm_resource(i, 300 + i - VO_COUNTDOWN, 1);
-    const float hz[] = {250, 130, 470, 170, 590, 890, 700, 420, 590, 520, 240, 127, 78, 1650, 294, 392, 494, 247, 330, 110, 62};
-    const float dur[] = {.12f, .13f, .29f, .57f, .42f, .24f, .42f, .35f, .12f, .88f, .80f, .095f, .52f, .39f, .38f, .38f, .38f, .38f, .38f, .82f, .98f};
+    const float hz[] = {250,130,470,170,590,890,700,420,590,520,240,127,78,1650,294,392,494,247,330,370,523,220,587,277,110,62};
+    const float dur[] = {.12f,.13f,.29f,.57f,.42f,.24f,.42f,.35f,.12f,.88f,.80f,.095f,.52f,.39f,.38f,.38f,.38f,.38f,.38f,.38f,.38f,.38f,.38f,.38f,.82f,.98f};
+    _Static_assert(sizeof hz/sizeof *hz==VO_COUNTDOWN && sizeof dur/sizeof *dur==VO_COUNTDOWN, "missing synthesized sound");
     uint32_t rng = 132;
     for (int i = 0; i < VO_COUNTDOWN; i++) {
         int n = (int)(RATE * dur[i]);
@@ -107,7 +108,7 @@ static int prepare(void) {
                          (sinf(TAU * h * a) + .35f * sinf(TAU * h * 2.63f * a));
                 }
             }
-            if (i >= S_PICK0 && i <= S_PICK4) {
+            if (i >= S_PICK0 && i <= S_PICK9) {
                 /* Short pentatonic pluck and a delayed glass overtone; distinguish
                    a hero change from menu navigation without interrupting music. */
                 float fundamental = hz[i];

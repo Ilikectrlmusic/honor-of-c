@@ -108,28 +108,6 @@ static void tap(int key) {
     ui_key(key, 1);
     ui_key(key, 0);
 }
-/* Optional frame export from the actual draft-room demo; generates no gameplay data. */
-static int motion_capture(const wchar_t *dir) {
-    CreateDirectoryW(dir, NULL);
-    if (!draw_init(NULL, 800, 450))
-        return 2;
-    tap(VK_RETURN);
-    tap('V');
-    int ok = app.overlay == REHEARSAL;
-    for (int role = 0; role < 5; role++) {
-        tap('1' + role);
-        for (int i = 0; i < 252; i++) {
-            ui_tick(1.f / 60);
-            if (i % 5 != 0 || (role && i < 150))
-                continue;
-            wchar_t name[64];
-            swprintf(name, 64, L"role%d-%03d", role, i);
-            ok &= capture(dir, name);
-        }
-    }
-    draw_close();
-    return ok ? 0 : 3;
-}
 /* Run the same UI and real Direct2D drawing path, using a WIC backbuffer, no desktop required. */
 static int gallery(const wchar_t *dir) {
     CreateDirectoryW(dir, NULL);
@@ -145,10 +123,10 @@ static int gallery(const wchar_t *dir) {
           hair != draw_region_hash(1090, 112, 137, 74);
     tap(VK_RETURN);
     ok &= app.screen == DRAFT;
-    uint32_t figures[5];
-    for (int role = 0; role < 5; role++) {
-        app.mx = 75 + role * 164;
-        app.my = 262;
+    uint32_t figures[HERO_COUNT];
+    for (int role = 0; role < HERO_COUNT; role++) {
+        app.mx = 75 + (role%5) * 164;
+        app.my = 211 + (role/5)*131;
         ui_click(0);
         ok &= app.selected == role;
         ui_tick(.48f);
@@ -169,20 +147,21 @@ static int gallery(const wchar_t *dir) {
     app.mx = 1083;
     app.my = 273;
     ui_click(0);
-    ok &= app.selected == 4;
+    ok &= app.selected == HERO_COUNT-1;
     tap(VK_RIGHT);
     ok &= app.selected == 0;
     tap(VK_LEFT);
-    ok &= app.selected == 4;
+    ok &= app.selected == HERO_COUNT-1;
     tap('3');
     ui_tick(.6f);
     ok &= app.selected == 2 && capture(dir, L"draft");
     tap('V');
-    ok &= app.overlay == REHEARSAL;
-    for (int i = 0; i < 5; i++) {
-        tap('1' + i);
+    ok &= app.screen == TRAINING;
+    for (int i = 0; i < HERO_COUNT; i++) {
+        tap(i==9?'0':'1'+i);
+        app.mx=app.g.u[5].pos.x;app.my=app.g.u[5].pos.y;
         tap('R');
-        for (int n = 0; n < (int[]){34, 31, 42, 39, 27}[i]; n++)
+        for (int n = 0; n < (int[]){34,31,42,39,27,34,39,41,42,36}[i]; n++)
             ui_tick(1.f / 60);
         wchar_t name[32];
         swprintf(name, 32, L"ultimate-%d", i);
@@ -269,12 +248,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show) {
     if(ac==2 && !wcscmp(av[1],L"--audio-check")) {
         int ok=audio_check();LocalFree(av);CoUninitialize();return ok?0:5;
     }
-    if (ac == 3 && !wcscmp(av[1], L"--motion-capture")) {
-        int result = motion_capture(av[2]);
-        LocalFree(av);
-        CoUninitialize();
-        return result;
-    }
     if (ac == 3 && !wcscmp(av[1], L"--gallery")) {
         int result = gallery(av[2]);
         LocalFree(av);
@@ -323,14 +296,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show) {
     SendMessageW(window, WM_LBUTTONDOWN, 0, MAKELPARAM((int)(dx + (x) * us), (int)(dy + (y) * us)))
         CLICK_VIRTUAL(160, 464);
         int ok = app.screen == DRAFT;
-        for (int i = 0; i < 5; i++) {
-            CLICK_VIRTUAL(110 + 164 * i, 269);
+        for (int i = 0; i < HERO_COUNT; i++) {
+            CLICK_VIRTUAL(110 + 164 * (i%5), 211+131*(i/5));
             ui_tick(.47f);
             ui_draw();
             ok &= app.selected == i && draw_end();
         }
         CLICK_VIRTUAL(1077, 300);
-        ok &= app.selected == 4;
+        ok &= app.selected == HERO_COUNT-1;
         for (int i = 0; i < 3; i++) {
             CLICK_VIRTUAL(185 + 94 * i, 550);
             ok &= app.difficulty == i;
@@ -338,7 +311,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show) {
 #undef CLICK_VIRTUAL
         SendMessageW(window, WM_KEYDOWN, 'V', 0);
         SendMessageW(window, WM_KEYUP, 'V', 0);
-        ok &= app.overlay == REHEARSAL;
+        ok &= app.screen == TRAINING;
         SendMessageW(window, WM_KEYDOWN, '3', 0);
         SendMessageW(window, WM_KEYUP, '3', 0);
         SendMessageW(window, WM_KEYDOWN, 'R', 0);
@@ -354,6 +327,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show) {
         SendMessageW(window, WM_KEYUP, VK_RETURN, 0);
         ok &= app.screen == VERSUS && app.lineup[0]==0 && app.g.u[0].role==2;
         for(int i=0;i<230;i++) ui_tick(1.f/60);
+        ok &= app.screen==OPENING && !alive(&app.g.u[0]);
+        for(int i=0;i<191;i++)ui_tick(1.f/60);
         ok &= app.screen==MATCH;
         SendMessageW(window, WM_RBUTTONDOWN, 0, MAKELPARAM(cw / 2, ch / 2));
         ok &= app.g.u[0].order == 1;

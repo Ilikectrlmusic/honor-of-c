@@ -7,7 +7,7 @@
 #define GOLD 0xf2cc81
 #define RED 0xff876b
 const uint32_t teamColor[3] = {0x61dcd2, 0xfc7b68, 0xe7bd70};
-const HeroDef heroes[5] = {
+const HeroDef heroes[HERO_COUNT] = {
     {L"烬锋",
      L"战士",
      L"近战突进",
@@ -26,7 +26,7 @@ const HeroDef heroes[5] = {
      L"远程持续",
      L"以游走和连射，牵制整条兵线。",
      {L"穿林箭", L"逐风", L"流星箭雨"},
-     {L"向指针射出可穿透敌人的利箭。", L"向指针翻滚，短时提高攻速和移速。",
+     {L"向指针射出可穿透敌人的利箭。", L"翻滚时朝指针射出一支风矢，并短时提高攻速和移速。",
       L"在指定区域降下箭雨，造成伤害与减速。"},
      0x85d9a0,
      755,
@@ -54,7 +54,7 @@ const HeroDef heroes[5] = {
      L"前排守护",
      L"以重盾守住阵线，为同伴争取时间。",
      {L"撼地", L"金城", L"山崩"},
-     {L"盾击周围敌人，并使其减速。", L"为自身与附近友军英雄施加护盾。", L"向指针跃进，震晕落点周围的敌人。"},
+     {L"盾击周围敌人，并使其减速。", L"为自身及附近友军加盾，同时用盾震打击身边敌人。", L"向指针跃进，震晕落点周围的敌人。"},
      0xe2b86c,
      1330,
      66,
@@ -75,7 +75,27 @@ const HeroDef heroes[5] = {
      83,
      199,
      .75f,
-     {4, 6, 19}}};
+     {4, 6, 19}},
+    {L"玄霆", L"战士", L"雷枪破阵", L"枪尖引下天雷，以护身电甲冲开阵线。",
+     {L"贯雷", L"惊蛰甲", L"九霄落雷"},
+     {L"掷出一道贯穿敌人的雷枪。", L"披上电甲、短时加速；电弧从身边目标向另一名敌人跳跃。", L"在指针处刻下雷印，落雷重创并击晕范围内敌人。"},
+     0xa99cff, 1080, 72, 104, 178, .90f, {5, 9, 22}},
+    {L"珊音", L"辅助", L"潮声群愈", L"一弦唤潮，一曲回春。海上归舟皆识此音。",
+     {L"弦波", L"回澜曲", L"三叠潮"},
+     {L"弹出穿透声波，使命中的敌人减速。", L"为身边友军及自己回血，在指针处奏响一次延时伤敌的回音。", L"向指定地点推出三重渐进的潮浪，连续造成伤害与减速。"},
+     0x75e5d4, 860, 59, 248, 175, .94f, {5, 8, 23}},
+    {L"丹砂", L"法师", L"炼火爆破", L"炉火未熄。腰间一匣丹丸，足以点燃半座山门。",
+     {L"流火丸", L"护炉焰", L"天炉散星"},
+     {L"投出火丸，碰敌爆裂并波及附近目标。", L"升起护盾，爆开近身炉焰并使敌人减速。", L"在目标附近布下三枚依次引爆的丹火。"},
+     0xffad65, 845, 66, 239, 166, 1.02f, {5.5f, 9, 24}},
+    {L"雪翎", L"射手", L"霜弓游击", L"雪过无痕，唯有弦响时，冰花才在敌阵盛开。",
+     {L"三羽箭", L"踏雪", L"寒晶绽"},
+     {L"向扇形区域射出三支霜箭；近身可多箭命中。", L"向指针滑步，留下霜环减速追兵。", L"在指定地点绽开冰晶，冻结范围内的敌人。"},
+     0x95dfff, 745, 69, 298, 181, .82f, {5, 7, 22}},
+    {L"墨衡", L"法师", L"墨阵封路", L"落笔成阵，收锋化龙。战场便是未干的长卷。",
+     {L"飞白", L"困字诀", L"游龙入墨"},
+     {L"挥笔打出贯穿敌人的墨锋。", L"在目标处写下墨圈，短暂延迟后定住敌人。", L"沿笔锋方向依次爆开五段墨龙，重叠处可多次命中。"},
+     0xb5cfbb, 780, 64, 255, 173, .98f, {4.5f, 8, 23}}};
 const wchar_t *itemNames[3] = {L"破军刃", L"玄甲", L"追风履"};
 const wchar_t *itemDesc[3] = {L"攻击 +18，普攻和技能均受益", L"生命上限 +210，立即回复 210",
                               L"移速 +12，攻击间隔缩短 7%"};
@@ -511,27 +531,43 @@ static void spawn_wave(Game *g) {
                 u->think = rnd(g) * .3f;
             }
 }
-void game_init(Game *g, int role, int diff, uint32_t seed) {
+static void init_world(Game *g, int role, int diff, uint32_t seed,int staged) {
     memset(g, 0, sizeof *g);
-    g->rng = seed ? seed : 1;
+    /* Avalanche adjacent GetTickCount / replay seeds before the first draw. */
+    uint32_t mix=seed+0x9e3779b9u;
+    mix=(mix^(mix>>16))*0x85ebca6bu;
+    mix=(mix^(mix>>13))*0xc2b2ae35u;
+    mix^=mix>>16;
+    g->rng = mix ? mix : 1;
     g->diff = diff;
     g->winner = -1;
     nav_init(g);
     for (int t = 0; t < 2; t++) {
-        int used[5] = {0};
-        int enemyPick = (int)(rnd(g) * 5);
+        /* Independent draws, without replacement inside each team. Reserve the
+           player's choice before shuffling; the VS screen reads these same units. */
+        int pool[HERO_COUNT], lanes[5] = {1, 2, 1, 0, 0};
+        for (int k = 0; k < HERO_COUNT; ++k) pool[k] = k;
+        if (!t) {
+            if (role < 0 || role >= HERO_COUNT) role = 0;
+            pool[0] = role;
+            pool[role] = 0;
+        }
+        int first = !t;
+        for (int end = HERO_COUNT - 1; end > first; --end) {
+            int n = first + (int)(rnd(g) * (end - first + 1));
+            int a = pool[n]; pool[n] = pool[end]; pool[end] = a;
+        }
+        /* Assign the five lane slots by preference, without ever abandoning a lane. */
         for (int j = 0; j < 5; j++) {
-            int r = j == 0 ? (t ? enemyPick : role) : 0;
-            if (j)
-                while (used[r])
-                    r++;
-            used[r] = 1;
+            int r = pool[j], pick = j;
+            int pref = (int[]){1,2,1,0,0,0,2,1,2,1}[r];
+            for (int k = j; k < 5; ++k) if (lanes[k] == pref) {pick = k; break;}
             const HeroDef *h = &heroes[r];
             V p = add(bases[t], vec((j % 3 - 1) * 49, (j / 3) * 42 - 25));
             Unit *u = make(g, t * 5 + j, HERO, t, p);
             u->home = bases[t];
             u->role = r;
-            u->lane = (int[]){1, 2, 1, 0, 0}[r];
+            u->lane = lanes[pick]; lanes[pick] = lanes[j];
             u->wp = t ? nway(u->lane) - 2 : 1;
             u->maxhp = u->hp = h->health;
             u->power = h->attack;
@@ -540,7 +576,8 @@ void game_init(Game *g, int role, int diff, uint32_t seed) {
             u->reach = h->reach;
             u->gold = 160;
             u->think = rnd(g) * .3f;
-            arrival(g, t * 5 + j, j == 0 ? 1.45f : 1.10f, j == 0 ? 1.f : .67f);
+            if(staged) u->used=0;
+            else arrival(g, t * 5 + j, j == 0 ? 1.45f : 1.10f, j == 0 ? 1.f : .67f);
         }
         for (int l = 0; l < 3; l++)
             for (int k = 0; k < 2; k++) {
@@ -574,10 +611,62 @@ void game_init(Game *g, int role, int diff, uint32_t seed) {
         g->u[i].hp = g->u[i].maxhp;
     }
     g->wave = 7; /* Two seconds for the greeting, then a real five-second warning. */
-    sound(g, VO_WELCOME);
+    g->awaitingSpawn = staged;
+    if (!staged)
+        sound(g, VO_WELCOME);
     g->pay = 1;
     g->aim = lane_at(1, .5f);
     vision(g);
+}
+void game_init(Game *g, int role, int diff, uint32_t seed) {
+    init_world(g, role, diff, seed, 0);
+}
+void game_prepare_match(Game *g, int role, int diff, uint32_t seed) {
+    init_world(g, role, diff, seed, 1);
+}
+void game_deploy(Game *g) {
+    if (!g->awaitingSpawn)
+        return;
+    g->awaitingSpawn = 0;
+    /* Five distinct feet/beam origins on the fountain apron; do not obscure
+       either the crystal or the player behind a stack of overlapping sprites. */
+    static const V marks[5]={{0,99},{-115,40},{-59,80},{59,80},{115,40}};
+    for (int i = 0; i < HEROES; i++) {
+        g->u[i].pos=add(g->u[i].home,mul(marks[i%5],i<5?1.f:-1.f));
+        g->u[i].used = 1;
+        arrival(g, i, 1.45f, i % 5 == 0 ? 1.f : .78f);
+    }
+    /* Give control immediately; let the last arrival beam finish before
+       the five-second warning. The first wave really departs five seconds later. */
+    g->wave = 6.55f;
+    vision(g);
+}
+void game_training(Game *g, int role) {
+    init_world(g, role, 1, 0x725b, 1);
+    g->awaitingSpawn = 0;
+    g->training = 1;
+    for (int i = 0; i < MAXU; i++)
+        g->u[i].used = i == 0 || i == 5;
+    memset(g->nav, 0, sizeof g->nav);
+    /* The courtyard occupies the first 32 by 18 world cells. Stone walls
+       bound one shared collision grid for WASD, click routes and dashes. */
+    for (int y = 3; y < 16; y++)
+        for (int x = 2; x < 30; x++)
+            if (y < 14 || (x >= 4 && x < 28))
+                g->nav[y * GW + x] = 1;
+    Unit *p = &g->u[0], *d = &g->u[5];
+    p->home = p->pos = vec(276, 338);
+    p->dir = p->poseDir = 1;
+    p->face = vec(1, 0);
+    d->home = d->pos = vec(765, 320);
+    d->role = 3;
+    d->dir = d->poseDir = -1;
+    d->face = vec(-1, 0);
+    d->maxhp = d->hp = 2000;
+    d->grace = 0;
+    memset(g->sight, 255, sizeof g->sight);
+    g->sightFrame++;
+    arrival(g, 0, 1.45f, 1.f);
 }
 static int valid(const Game *g, int id, int serial) {
     return id >= 0 && id < MAXU && alive(&g->u[id]) && g->u[id].serial == serial;
@@ -786,6 +875,11 @@ static void damage(Game *g, int src, int id, float amt, float slow, float stun, 
                    : 0xf5f3df,
            (int)(amt + .5f));
     }
+    if(g->training && id==5){
+        g->practiceHits++;g->lastDamage=amt;g->practiceDamage+=amt;
+        if(u->hp<=0)u->hp=u->maxhp;
+        return;
+    }
     if (u->hp <= 0)
         die(g, id, src);
 }
@@ -908,6 +1002,101 @@ static void release_ultimate(Game *g, int id) {
         ultimate_fx(g, FX_ULT_IMPACT, u, u->pos, u->ultStart, tank ? .91f : .64f, tank ? 162 : 128);
     }
 }
+/* Each seal is a real delayed hit; draw both its tell and its impact at the hit
+   location so a moving target can dodge even the later links of a sequence. */
+static void seal(Game *g, int id, V center, V origin, float delay, float radius,
+                 float damageAmount, float slow, float stun) {
+    Unit *u = &g->u[id];
+    Shot *s = shot(g,id,3,center,vec(0,0),delay,damageAmount,heroes[u->role].color);
+    s->radius=radius; s->slow=slow; s->stun=stun; s->style=SHOT_SEAL;
+    ultimate_fx(g,FX_ULT_CAST,u,center,origin,delay,radius);
+}
+int hero_seals(int r,V p,V aim,V facing,V out[5],float *radius){
+    if(r<5 || r>=HERO_COUNT) return 0;
+    V d=norm(sub(aim,p));
+    if(lengthv(d)<.5f) d=facing;
+    V q=bounded(p,aim,470),side=vec(-d.y,d.x);
+    int n=(int[]){1,3,3,1,5}[r-5];
+    *radius=(float[]){127,110,94,151,76}[r-5];
+    for(int j=0;j<n;j++){
+        if(r==6) out[j]=add(q,mul(d,(j-1)*68.f));
+        else if(r==7) out[j]=add(q,add(mul(d,j==0?-42.f:25.f),mul(side,j==0?0:j==1?-49.f:49.f)));
+        else if(r==9) out[j]=add(add(p,mul(sub(q,p),(j+1)*.2f)),mul(side,sinf((j+1)*1.55f)*22));
+        else out[j]=q;
+    }
+    return n;
+}
+static void cast_second_roster(Game *g, int id, int slot, V aim, V d, float power) {
+    Unit *u=&g->u[id]; int r=u->role; V p=u->pos, q=bounded(p,aim,470), side=vec(-d.y,d.x);
+    uint32_t c=heroes[r].color;
+    if (slot==0) {
+        int fan=r==8?3:1;
+        for (int i=0;i<fan;i++) {
+            float angle=fan==3?(i-1)*.19f:0;
+            V v=add(mul(d,cosf(angle)),mul(side,sinf(angle)));
+            float speed=r==7?485:r==6?565:750;
+            Shot *s=shot(g,id,r==7||r==8?1:2,p,mul(v,speed),480/speed,
+                         power*(float[]){1.87f,1.40f,1.86f,.94f,1.72f}[r-5],c);
+            s->radius=r==6?32:r==7?22:15;
+            s->splash=r==7?91:0;
+            s->slow=r==6?1.5f:r==8?.65f:0;
+        }
+    } else if (slot==1) {
+        switch(r) {
+        case 5:
+            u->shield=fmaxf(u->shield,85+power*1.35f); u->haste=2.2f;
+            fx(g,FX_HEAL,p,p,.55f,52,c,0);
+            { V origin=p; int previous=-1;
+              for(int hop=0;hop<2;hop++){
+                int next=-1; float near=hop?135:ARC_REACH;
+                for(int j=0;j<MAXU;j++){
+                    Unit *v=&g->u[j];
+                    if(j==previous || !alive(v) || !hostile(u,v) || v->grace>0 || protected_building(g,j)) continue;
+                    float distance=dist(origin,v->pos);
+                    if(distance<=near){near=distance;next=j;}
+                }
+                if(next<0) break;
+                V end=g->u[next].pos;
+                fx(g,FX_LINE,origin,end,.28f,10-hop*3,c,0);
+                fx(g,FX_BURST,end,end,.25f,21,c,0);
+                damage(g,id,next,power*(hop?.64f:1.03f),0,0,1);
+                origin=end; previous=next;
+              }
+            }
+            break;
+        case 6:
+            fx(g,FX_RING,p,p,.62f,245,c,0);
+            for(int j=0;j<HEROES;j++) {
+                Unit *ally=&g->u[j];
+                if(!alive(ally)||ally->team!=u->team||dist(ally->pos,p)>245) continue;
+                ally->hp=fminf(ally->maxhp,ally->hp+60+power*1.35f);
+                fx(g,FX_HEAL,ally->pos,p,.78f,48,c,0);
+            }
+            { V echo=bounded(p,aim,TIDE_ECHO_RANGE);
+              Shot *s=shot(g,id,3,echo,vec(0,0),.31f,power*1.16f,c);
+              s->radius=TIDE_ECHO_RADIUS;
+              fx(g,FX_LINE,p,echo,.29f,7,c,0);fx(g,FX_ZONE,echo,echo,.31f,TIDE_ECHO_RADIUS,c,3);
+            }
+            break;
+        case 7:
+            u->shield=fmaxf(u->shield,70+power);
+            area(g,id,p,138,power*1.10f,1.3f,0,0); fx(g,FX_RING,p,p,.48f,138,c,0); break;
+        case 8:
+            area(g,id,p,115,power*.78f,2,0,0); dash(g,u,d,156);
+            fx(g,FX_RING,p,p,.55f,115,c,0); fx(g,FX_LINE,p,u->pos,.46f,12,c,0); break;
+        case 9: {
+            Shot *s=shot(g,id,3,q,vec(0,0),.48f,power*1.12f,c);
+            s->radius=99;s->stun=1.42f;fx(g,FX_ZONE,q,q,.48f,99,c,0); break;
+        }}
+    } else {
+        /* First hit, interval, power ratio, slow and stun. */
+        static const float timing[][5]={{.53f,0,3.1f,0,1.05f},{.38f,.20f,1.16f,1.35f,0},
+            {.44f,.19f,1.37f,0,0},{.62f,0,2.65f,.85f,1.45f},{.355f,.105f,1.02f,1.05f,0}};
+        const float *s=timing[r-5];V centers[5];float radius;
+        int n=hero_seals(r,p,aim,d,centers,&radius);
+        for(int j=0;j<n;j++) seal(g,id,centers[j],p,s[0]+s[1]*j,radius,power*s[2],s[3],s[4]);
+    }
+}
 int game_cast(Game *g, int id, int slot, V aim) {
     if (slot < 0 || slot > 2 || id < 0 || id >= 10 || g->winner >= 0)
         return 0;
@@ -923,10 +1112,10 @@ int game_cast(Game *g, int id, int slot, V aim) {
     u->face = d;
     if (fabsf(d.x) > .1f)
         u->dir = d.x < 0 ? -1 : 1;
-    u->cd[slot] = h->cd[slot];
+    u->cd[slot] = g->training ? 0 : h->cd[slot];
     u->recall = 0;
     u->swingTarget = -1;
-    pose(u, slot == 2 ? POSE_ULT : POSE_SKILL, slot == 2 ? (float[]){.57f, .69f, .91f, .71f, .45f}[r] : .31f);
+    pose(u, slot == 2 ? POSE_ULT : POSE_SKILL, slot == 2 ? (float[]){.57f,.69f,.91f,.71f,.45f,.68f,.80f,.78f,.66f,.82f}[r] : .31f);
     float a = u->power * (u->buff > 0 ? 1.25f : 1);
     uint32_t c = h->color;
     Shot *s;
@@ -935,7 +1124,8 @@ int game_cast(Game *g, int id, int slot, V aim) {
         g->castCount[slot]++;
         sound(g, slot == 2 ? S_ULT : S_SKILL);
     }
-    if ((r == 0 || r == 4) && slot == 0) {
+    if (r>=5) cast_second_roster(g,id,slot,aim,d,a);
+    else if ((r == 0 || r == 4) && slot == 0) {
         dash(g, u, d, r == 0 ? 156 : 198);
         q = u->pos;
         fx(g, FX_LINE, p, q, .34f, 24, c, 0);
@@ -963,6 +1153,10 @@ int game_cast(Game *g, int id, int slot, V aim) {
         s->splash = r == 2 ? 100 : 0;
         s->slow = r == 4 ? 2 : 0;
     } else if (r == 1 && slot == 1) {
+        /* Fire before translating: a close target must not end up behind the
+           muzzle when the roll carries the archer past it. */
+        s=shot(g,id,1,p,mul(d,790),WIND_ARROW_RANGE/790.f,1.24f*a,c);
+        s->radius=15;
         dash(g, u, d, 130);
         u->haste = 3.2f;
         fx(g, FX_LINE, p, u->pos, .42f, 13, c, 0);
@@ -983,6 +1177,8 @@ int game_cast(Game *g, int id, int slot, V aim) {
         area(g, id, p, 143, a * 1.65f, 1.8f, 0, 0);
         fx(g, FX_RING, p, p, .45f, 143, c, 0);
     } else if (r == 3 && slot == 1) {
+        area(g,id,p,AEGIS_RADIUS,a*1.03f,0,0,0);
+        fx(g,FX_RING,p,p,.42f,AEGIS_RADIUS,c,0);
         for (int j = 0; j < 10; j++)
             if (alive(&g->u[j]) && g->u[j].team == u->team && dist(p, g->u[j].pos) < 242) {
                 g->u[j].shield = fmaxf(g->u[j].shield, 130 + a * 1.5f);
@@ -1059,6 +1255,7 @@ void game_rally(Game *g, V pos) {
 }
 static int pick(Game *g, int id, float radius, int neutral) {
     Unit *u = &g->u[id];
+    int tactical=id<HEROES && u->kind==HERO && !g->training && (id!=0 || g->autoplay);
     int best = -1;
     float score = 1e7f;
     for (int j = 0; j < MAXU; j++) {
@@ -1069,6 +1266,7 @@ static int pick(Game *g, int id, float radius, int neutral) {
         float d = dist(u->pos, v->pos);
         if (d > radius)
             continue;
+        if(tactical && !structure(v) && !visible(g,u->team,v->pos)) continue;
         float s = d;
         if (structure(u)) {
             if (v->kind == HERO)
@@ -1081,6 +1279,20 @@ static int pick(Game *g, int id, float radius, int neutral) {
             if (v->kind == CORE)
                 s -= 75;
             s += v->hp / v->maxhp * 35;
+            if(tactical){
+                if(j==u->target && v->serial==u->targetSerial) s-=32;
+                if(v->kind==HERO){
+                    s-=78*(1-v->hp/v->maxhp);
+                    if(v->hp+v->shield<u->power*2.2f) s-=94;
+                    for(int k=u->team*5;k<u->team*5+5;k++)
+                        if(alive(&g->u[k]) && g->u[k].hp<g->u[k].maxhp*.55f &&
+                           g->time-g->u[k].tag[j]<2.3f && dist(u->pos,g->u[k].pos)<330){
+                            s-=90;break;
+                        }
+                } else if((v->kind==MELEE||v->kind==RANGED||v->kind==SIEGE) &&
+                          v->hp+v->shield<=u->power && d<=u->reach+18)
+                    s-=102;
+            }
         }
         if (s < score) {
             best = j;
@@ -1150,7 +1362,7 @@ static void player(Game *g, Unit *u, Input in, float dt) {
         basic(g, 0, u->target);
         return;
     }
-    if ((u->order != 1 || in.attack) && (u->atk <= 0 || u->order == 3)) {
+    if ((!g->training || in.attack || u->order==3) && (u->order != 1 || in.attack) && (u->atk <= 0 || u->order == 3)) {
         int a = pick(g, 0, u->reach + 14, in.attack);
         if (a >= 0) {
             basic(g, 0, a);
@@ -1181,6 +1393,125 @@ static void shop_ai(Game *g, int id) {
             ;
     if (j < 3)
         game_buy(g, id, j);
+}
+/* These routines run only for bot heroes. Perception is sampled on the think
+   clock, not on every render/simulation frame. Never use the player's input
+   vector to predict a shot or the hidden aim of an unannounced enemy cast. */
+static int bot_difficulty(const Game *g,const Unit *u){return u->team?g->diff:1;}
+static float tower_risk(const Game *g,const Unit *u,V p) {
+    float risk=0;
+    for(int i=10+(1-u->team)*7;i<17+(1-u->team)*7;i++){
+        const Unit *t=&g->u[i];
+        if(alive(t)) risk+=fmaxf(0,t->reach+25-dist(p,t->pos));
+    }
+    return risk;
+}
+static void bot_observe(Game *g,int id) {
+    Unit *u=&g->u[id]; BotMind *m=&g->bot[id];
+    int diff=bot_difficulty(g,u);
+    if(valid(g,u->target,u->targetSerial)){
+        Unit *v=&g->u[u->target];
+        if(v->serial!=m->observedSerial){
+            m->observedSerial=v->serial;m->velocity=vec(0,0);
+            m->readyAt=g->time+.27f-.07f*diff+.12f*rnd(g);
+        } else {
+            float elapsed=g->time-m->sampleTime;
+            if(elapsed>.03f){
+                V speedSample=mul(sub(v->pos,m->sample),1/elapsed);
+                /* Discard flashes/teleports rather than extrapolating them. */
+                m->velocity=lengthv(speedSample)<310 ? mul(add(m->velocity,speedSample),.5f):vec(0,0);
+            }
+        }
+        m->sample=v->pos; m->sampleTime=g->time;
+    } else {m->observedSerial=0; m->velocity=vec(0,0);}
+    m->friends=1;m->rivals=0;m->buddy=-1;float best=-10000,need=0;int care=0;
+    if(u->role==6 && u->maxhp-u->hp>85){
+        need=(1-u->hp/u->maxhp); care=id+1;
+    }
+    for(int j=0;j<HEROES;j++){
+        Unit *v=&g->u[j];if(j==id||!alive(v))continue;
+        float d=dist(u->pos,v->pos);if(d>440)continue;
+        if(v->team!=u->team){
+            if(visible(g,u->team,v->pos))m->rivals++;
+        }else{
+            m->friends++;
+            /* Prefer a nearby ally who can stand between us and a pursuer. */
+            float score=95*v->hp/v->maxhp+(v->reach<150?30:0)-d*.28f;
+            if(!v->retreat && score>best){m->buddy=j;best=score;}
+            float urgency=1-v->hp/v->maxhp - fmaxf(0,d-245)*.0007f;
+            if(u->role==6 && v->maxhp-v->hp>85 && d<395 && urgency>need){
+                need=urgency;care=j+1;
+            }
+        }
+    }
+    if(care!=m->careSlot){
+        m->careSlot=care;
+        if(care)m->careAt=g->time+.20f-.05f*diff;
+    }
+    if(g->time>=m->strafeAt){
+        m->strafeSide=rnd(g)<.5f?-1:1;
+        m->strafeAt=g->time+.72f+rnd(g)*.88f;
+    }
+    if(g->time<m->nextDodge)return;
+    V hazards[12];float radii[12];int count=0;
+    for(int i=0;i<MAXP&&count<12;i++){
+        Shot *s=&g->shot[i];
+        if(!s->live||s->kind!=3||s->team==u->team||s->life<.08f||s->life>1.35f||
+           dist(u->pos,s->p)>s->radius+8||!visible(g,u->team,s->p)) continue;
+        hazards[count]=s->p;radii[count++]=s->radius;
+    }
+    for(int i=24;i<28&&count<12;i++){
+        Unit *v=&g->u[i];
+        if(alive(v)&&v->swingTarget>=0 && v->releaseIn>.09f && v->releaseIn<STONE_CONTACT &&
+           visible(g,u->team,v->pos) && dist(u->pos,v->stoneAim)<STONE_RADIUS+8){
+            hazards[count]=v->stoneAim;radii[count++]=STONE_RADIUS;
+        }
+    }
+    if(!count)return;
+    m->nextDodge=g->time+1.20f+rnd(g)*.55f;
+    if(rnd(g)>(.48f+diff*.20f))return; /* a tell is not a guaranteed dodge */
+    float top=-1e8f;V dest=u->pos;
+    for(int j=0;j<8;j++){
+        float ang=(j+.21f*id)*.7853982f;
+        V q=dash_end(g,u->pos,vec(cosf(ang),sinf(ang)),120);
+        float clearance=1e5f;
+        for(int h=0;h<count;h++) clearance=fminf(clearance,dist(q,hazards[h])-radii[h]);
+        float score=clearance-tower_risk(g,u,q)*2-.08f*dist(q,u->home);
+        if(dist(q,u->pos)>25 && score>top){top=score;dest=q;}
+    }
+    if(dist(dest,u->pos)>25){
+        m->escape=dest;m->evadeAt=g->time+.19f-.045f*diff+rnd(g)*.09f;
+        m->evadeUntil=m->evadeAt+.62f;
+    }
+}
+static int bot_spell(Game *g,int id,int slot,V aim){
+    BotMind *m=&g->bot[id];Unit *u=&g->u[id];
+    if(g->time<m->skillAt || (u->swingTarget>=0&&u->releaseIn>0) || !game_cast(g,id,slot,aim))return 0;
+    m->skillAt=g->time+.40f+.21f*rnd(g)+.07f*(2-bot_difficulty(g,u));
+    return 1;
+}
+static void bot_combo(Game *g,int id,int target,float distance){
+    Unit *u=&g->u[id],*v=&g->u[target];BotMind *m=&g->bot[id];
+    int r=u->role,duel=v->kind==HERO,diff=bot_difficulty(g,u);
+    if(g->time<m->readyAt||g->time<m->skillAt||structure(v))return;
+    /* Winning the last hit with a basic is better than wasting a spell. */
+    if(!duel && v->kind!=GOLEM && v->hp<=u->power && distance<u->reach+14) return;
+    float lead=fminf(.41f,distance/680.f)*(.42f+.19f*diff);
+    V aim=add(v->pos,mul(m->velocity,lead));
+    V back=add(u->pos,mul(norm(sub(u->pos,v->pos)),150));
+    if(duel && (r==1||r==8) && v->reach<150 && distance<125 && bot_spell(g,id,1,back))return;
+    if(duel && (r==3||r==5||r==7) && distance<160 && u->shield<36 && bot_spell(g,id,1,v->pos))return;
+    if(duel && (r==2||r==9) && distance<462 && v->stun<.1f && bot_spell(g,id,1,aim))return;
+    if(duel && distance<(r==3?228:r==4?285:423) &&
+       (v->stun>.18f || v->hp<v->maxhp*.64f || m->rivals>1 || u->cd[0]>.1f) &&
+       bot_spell(g,id,2,v->stun>.18f?v->pos:aim))return;
+    float qRange=r==3?141:r==0?175:r==4?208:465;
+    if(distance<qRange && bot_spell(g,id,0,aim))return;
+    float eRange=(float[]){160,450,460,158,500,180,475,138,115,460}[r];
+    if(distance>=eRange || (!duel && r!=0 && r!=4 && r!=9))return;
+    if(r==1 && (distance<200 || tower_risk(g,u,add(u->pos,mul(norm(sub(aim,u->pos)),130)))>0))return;
+    if(r==6 && (u->hp<u->maxhp*.7f || m->careSlot))return; /* save a needed heal */
+    bot_spell(g,id,1,r==8?back:aim);
 }
 static void brain(Game *g, int id, float dt) {
     Unit *u = &g->u[id];
@@ -1223,6 +1554,10 @@ static void brain(Game *g, int id, float dt) {
             basic(g, id, u->target);
         return;
     }
+    if(hero && valid(g,u->target,u->targetSerial) && !structure(&g->u[u->target]) &&
+       !visible(g,u->team,g->u[u->target].pos)){
+        lock(g,u,-1);g->bot[id].observedSerial=0;
+    }
     if (u->think <= 0) {
         u->think = .23f + rnd(g) * .18f;
         if (hero) {
@@ -1256,10 +1591,26 @@ static void brain(Game *g, int id, float dt) {
         }
         if (!(structure(u) && u->aggro > 0 && valid(g, u->target, u->targetSerial) &&
               dist(u->pos, g->u[u->target].pos) < u->reach + 8)) {
-            int a = pick(g, id, structure(u) ? u->reach : hero ? 345 : 178, 0);
+            int a = pick(g, id, structure(u) ? u->reach : hero ? (u->reach>=200?435:355) : 178, 0);
             if (a != u->target && a >= 0)
                 u->repath = 0;
             lock(g, u, a);
+        }
+        if(hero) bot_observe(g,id);
+    }
+    if(hero && g->time>=g->bot[id].evadeAt && g->time<g->bot[id].evadeUntil &&
+       dist(u->pos,g->bot[id].escape)>7){
+        move(g,u,sub(g->bot[id].escape,u->pos),speed(u)*dt,0);
+        return;
+    }
+    /* Heal wounded allies even when not tracking an enemy. Healthy groups
+       keep the heal available for the next engagement. */
+    if(hero && u->role==6 && u->cd[1]<=0 && g->bot[id].careSlot &&
+       g->time>=g->bot[id].careAt) {
+        Unit *v=&g->u[g->bot[id].careSlot-1];
+        if(alive(v) && v->maxhp-v->hp>65 && dist(u->pos,v->pos)<=245){
+            V aim=valid(g,u->target,u->targetSerial)?g->u[u->target].pos:v->pos;
+            bot_spell(g,id,1,aim);
         }
     }
     if (hero && u->retreat) {
@@ -1282,8 +1633,8 @@ static void brain(Game *g, int id, float dt) {
         }
         if (dist(u->pos, u->home) > 100)
             travel(g, u, u->home, dt);
-        if (u->role == 3 && u->shield < 60 && u->hp < .4f * u->maxhp)
-            game_cast(g, id, 1, u->home);
+        if ((u->role == 3 || u->role == 5 || u->role == 7) && u->shield < 60 && u->hp < .4f * u->maxhp)
+            bot_spell(g, id, 1, u->home);
         return;
     }
     if (hero && u->role == 4 && g->time > 1.5f && g->time < 100 && u->mode == 0) {
@@ -1304,6 +1655,14 @@ static void brain(Game *g, int id, float dt) {
         (!valid(g, u->target, u->targetSerial) || dist(u->pos, g->u[u->target].pos) > 230)) {
         travel(g, u, g->rally, dt);
         return;
+    }
+    if(hero && u->role==6 && u->cd[1]<1 && !rally && g->bot[id].careSlot &&
+       g->time>=g->bot[id].careAt && g->bot[id].rivals<=g->bot[id].friends){
+        Unit *v=&g->u[g->bot[id].careSlot-1];
+        if(alive(v) && v->hp<v->maxhp*.66f && dist(u->pos,v->pos)>236 &&
+           tower_risk(g,u,v->pos)<=tower_risk(g,u,u->pos)){
+            travel(g,u,v->pos,dt);return; /* close the gap for a wounded ally, not a suicide dive */
+        }
     }
     if (hero && valid(g, u->target, u->targetSerial)) {
         Unit *v = &g->u[u->target];
@@ -1331,24 +1690,29 @@ static void brain(Game *g, int id, float dt) {
         int a = u->target;
         Unit *v = &g->u[a];
         float d = dist(u->pos, v->pos);
-        if (hero && ((v->kind == HERO) || (v->kind != TOWER && v->kind != CORE && d < 265))) {
-            float rr = u->role == 1 || u->role == 2 ? 460 : u->role == 3 ? 142 : 175;
-            if (d < rr && u->cd[0] <= 0)
-                game_cast(g, id, 0, v->pos);
-            else if (d < (u->role == 0 ? 156 : 330) && u->cd[1] <= 0) {
-                V aim = u->role == 1 ? add(u->pos, mul(norm(sub(u->pos, v->pos)), 110)) : v->pos;
-                game_cast(g, id, 1, aim);
-            } else if (v->kind == HERO && u->cd[2] <= 0 && d < (u->role == 4 || u->role == 3 ? 270 : 420))
-                game_cast(g, id, 2, v->pos);
+        if(hero && g->time<g->bot[id].readyAt)return;
+        if (hero && ((v->kind == HERO) || (!structure(v) && d < 265))) {
+            bot_combo(g,id,a,d);
             if (!alive(v))
                 return;
             d = dist(u->pos, v->pos);
         }
+        if(hero && v->kind==HERO && g->bot[id].rivals>g->bot[id].friends &&
+           u->hp<u->maxhp*.62f && d>u->reach*.70f && v->hp>u->power*2){
+            int buddy=g->bot[id].buddy;
+            V safe=(buddy>=0 && alive(&g->u[buddy]))?g->u[buddy].pos:u->home;
+            if(dist(u->pos,safe)>105 && dist(safe,v->pos)>d+28){travel(g,u,safe,dt);return;}
+        }
         if (d <= u->reach + (structure(u) ? 4 : 14)) {
             basic(g, id, a);
-            if (hero && u->reach > 200 && v->kind == HERO && v->reach < 140 && d < u->reach * .62f &&
-                u->atk > .25f)
-                move(g, u, sub(u->pos, v->pos), speed(u) * dt * .88f, 0);
+            if(hero && u->reach>200 && v->kind==HERO && u->swingTarget<0 && u->atk>.16f){
+                V away=norm(sub(u->pos,v->pos));
+                float side=(float)g->bot[id].strafeSide;
+                V drift=add(mul(away,d<u->reach*.78f?1.f:-.13f),mul(vec(-away.y,away.x),side*.73f));
+                V look=add(u->pos,mul(norm(drift),42));
+                if(walkable(g,look)&&tower_risk(g,u,look)<=tower_risk(g,u,u->pos)+1)
+                    move(g,u,drift,speed(u)*dt*.87f,0);
+            }
         } else if (!structure(u))
             travel(g, u, v->pos, dt);
         return;
@@ -1375,7 +1739,7 @@ static void shots(Game *g, float dt) {
         if (s->kind == 3) {
             if (s->life <= 0) {
                 area(g, s->owner, s->p, s->radius, s->damage, s->slow, s->stun, 0);
-                if (s->style == SHOT_ARROW_RAIN || s->style == SHOT_METEOR)
+                if (s->style == SHOT_ARROW_RAIN || s->style == SHOT_METEOR || s->style == SHOT_SEAL)
                     ultimate_fx(g, FX_ULT_IMPACT, k, s->p, s->p, s->style == SHOT_METEOR ? .85f : .59f,
                                 s->radius);
                 else
@@ -1459,6 +1823,7 @@ static void stone_action(Game *g, int id, float dt) {
 }
 static void respawn(Game *g, int id) {
     Unit *u = &g->u[id];
+    if(id<HEROES)memset(&g->bot[id],0,sizeof g->bot[id]);
     u->pos = add(u->home, vec(id < 10 ? (id % 5 - 2) * 19 : 0, 0));
     u->hp = u->maxhp;
     u->serial = ++g->serial;
@@ -1482,15 +1847,17 @@ static void respawn(Game *g, int id) {
         game_notice(g, L"已重返战场");
 }
 void game_step(Game *g, float dt, Input in) {
-    if (g->winner >= 0 || dt <= 0)
+    if (g->awaitingSpawn || g->winner >= 0 || dt <= 0)
         return;
     dt = fminf(dt, .1f);
     g->time += dt;
     float previousWave = g->wave;
-    g->wave -= dt;
+    if (!g->training)
+        g->wave -= dt;
     if (!g->waves && previousWave > 5 && g->wave <= 5)
         sound(g, VO_COUNTDOWN);
-    g->pay -= dt;
+    if (!g->training)
+        g->pay -= dt;
     g->noticeTime -= dt;
     if (g->cardCount && (g->cardLife -= dt) <= 0) {
         memmove(g->cards, g->cards + 1, (--g->cardCount) * sizeof *g->cards);
@@ -1507,7 +1874,7 @@ void game_step(Game *g, float dt, Input in) {
         }
     }
     g->sightTimer-=dt;
-    if (g->wave <= 0) {
+    if (!g->training && g->wave <= 0) {
         spawn_wave(g);
         if (g->waves == 1) {
             sound(g, VO_MARCH);
@@ -1516,7 +1883,7 @@ void game_step(Game *g, float dt, Input in) {
         if (g->waves == 21)
             feed(g, L"决战时刻 · 兵线加速集结", GOLD);
     }
-    if (g->pay <= 0) {
+    if (!g->training && g->pay <= 0) {
         g->pay += 1;
         for (int i = 0; i < 10; i++) {
             g->u[i].gold += 5;
@@ -1547,6 +1914,7 @@ void game_step(Game *g, float dt, Input in) {
         u->aggro -= dt;
         u->grace -= dt;
         u->buff -= dt;
+        if(g->training && i==5)continue; /* Never run targeting, regen or movement on the practice dummy. */
         if (u->kind == HERO) {
             for (int j = 0; j < 3; j++)
                 u->cd[j] = fmaxf(0, u->cd[j] - dt);
@@ -1644,6 +2012,6 @@ void game_step(Game *g, float dt, Input in) {
         }
     }
     /* Don't leave a phantom observer for one tick after its tower is destroyed. */
-    if (g->sightTimer <= 0 || standing_defenses(g) != g->garrisonMask)
+    if (!g->training && (g->sightTimer <= 0 || standing_defenses(g) != g->garrisonMask))
         vision(g);
 }

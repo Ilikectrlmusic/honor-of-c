@@ -107,7 +107,53 @@ static void defenses(void) {
     advance(1, (Input){0});
     assert(!visible(&g, 0, overlap));
 }
+static void full_opening(void) {
+    game_prepare_match(&g, 2, 1, 198);
+    for (int i = 0; i < 10; i++)
+        assert(!alive(&g.u[i]) && !attached(i));
+    advance(500, (Input){1, 0, 1});
+    assert(g.time == 0 && g.soundN == 0 && !g.waves);
+    game_deploy(&g);
+    for (int i = 0; i < 10; i++)
+        assert(alive(&g.u[i]) && attached(i));
+    int warning = 0, march = 0;
+    for (int i = 0; i < 820; i++) {
+        g.soundN = 0;
+        advance(1, (Input){0});
+        for (int j = 0; j < g.soundN; j++) {
+            if (g.sound[j] == VO_COUNTDOWN) {
+                assert(!warning && g.wave <= 5 && g.wave > 4.98f && !g.waves);
+                for (int k = 0; k < 5; k++)
+                    assert(!attached(k));
+                warning = i;
+            }
+            if (g.sound[j] == VO_MARCH) {
+                assert(g.waves == 1 && warning && !march);
+                march = i;
+            }
+        }
+    }
+    assert(march - warning >= 599 && march - warning <= 601);
+}
+static void repeat_skills(void) {
+    for(int role=0;role<HERO_COUNT;role++){
+        game_training(&g,role);
+        Unit *p=&g.u[0],*d=&g.u[5];
+        V still=d->pos;
+        for(int pass=0;pass<2;pass++)for(int slot=0;slot<3;slot++){
+            p->pos=add(still,vec(-78,0));
+            assert(game_cast(&g,0,slot,still));
+            assert(p->cd[slot]==0);
+            advance(140,(Input){0});
+            assert(g.castCount[slot]==pass+1 && dist(d->pos,still)==0 && alive(d));
+        }
+        assert(g.practiceHits && g.practiceDamage>0 && !g.waves && g.winner<0);
+        assert(!walkable(&g,vec(1220,660)) && walkable(&g,p->home));
+    }
+}
 int main(void) {
+    repeat_skills();
+    full_opening();
     arrivals();
     defenses();
     puts("Observer simulation: moving births on both teams, player and AI recalls/respawns, stale life "

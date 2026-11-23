@@ -15,8 +15,9 @@ enum {
     ART_MOTION1,
     ART_MOTION2,
     ART_ULTIMATE,
-    ART_SILK, ART_IRON, ART_LANDSCAPE, ART_SWORDSMAN, ART_DOMAINS, ART_PROPS, ART_CRESTS,
-    ART_COUNT
+    ART_SILK, ART_IRON, ART_LANDSCAPE, ART_SWORDSMAN, ART_DOMAINS, ART_PROPS, ART_CRESTS, ART_DOJO,
+    ART_ROSTER_BUSTS, ART_ROSTER_DOMAINS, ART_ROSTER_CARDS, ART_ROSTER_SKILLS,
+    ART_MOTION3, ART_MOTION4, ART_COUNT
 };
 enum { F_UI, F_BOLD, F_SERIF, F_NUM };
 int draw_init(HWND wnd, int width, int height);
@@ -49,7 +50,7 @@ void portrait(int hero, float x, float y, float w, float h, float bias, float al
 void sprite(int id, float x, float feet, float size, float alpha, int flip);
 void effect_stamp(int tile, float cx, float cy, float w, float h, float radians, float opacity);
 void invalidate_shroud(void);
-void shroud(float x, float y, float w, float h, const unsigned char *light, int cols, int rows, int revision);
+void shroud(float x, float y, float w, float h, const unsigned char *light, int cols, int rows, int revision,float opacity);
 void cursor_clip(float x, float y, float w, float h);
 void clip_end(void);
 #endif

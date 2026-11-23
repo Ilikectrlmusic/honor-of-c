@@ -4,6 +4,10 @@ cd /d "%~dp0"
 if not exist build mkdir build
 gcc -std=c11 -O2 -Wall -Wextra -Wno-misleading-indentation src/game.c tests/simulation.c -o build/simulation.exe || exit /b 1
 build\simulation.exe || exit /b 1
+gcc -std=c11 -O2 -Wall -Wextra src/game.c tests/tactics.c -o build/tactics-checks.exe || exit /b 1
+build\tactics-checks.exe || exit /b 1
+gcc -std=c11 -O2 -Wall -Wextra tests/artwork.c -o build/art-checks.exe -lwindowscodecs -luuid -lole32 || exit /b 1
+build\art-checks.exe || exit /b 1
 gcc -std=c11 -O2 -Wall -Wextra src/game.c tests/motion.c -o build/motion-checks.exe || exit /b 1
 build\motion-checks.exe || exit /b 1
 gcc -std=c11 -O2 -Wall -Wextra src/game.c tests/feedback.c -o build/feedback-checks.exe || exit /b 1
