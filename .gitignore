@@ -19,10 +19,8 @@
 /tools/*
 !/tools/pack_motion.py
 !/tools/pack_roster.py
-!/tools/pack_dansha.py
 !/tools/pack_runtime_art.ps1
 !/tools/audit_exe.py
-!/tools/river_mask.py
 
 # Only assets embedded in the game are versioned
 /assets/*
