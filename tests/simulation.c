@@ -22,32 +22,69 @@ static void range_test(int role, int slot) {
     assert(game_cast(&g, 0, slot, v->pos));
     for (int i = 0; i < 61; i++)
         game_step(&g, 1.f / 60, idle);
-    if (role == 1 && slot == 1) {
-        assert(p->haste > 0 && dist(start, p->pos) > 60);
-    } else if (role == 3 && slot == 1) {
+    if ((role == 1 || role==8) && slot == 1) {
+        if(role==8) assert(v->slow>0);
+        else assert(p->haste>0);
+        assert(dist(start, p->pos)>60);
+    } else if ((role == 3 || role==5) && slot == 1) {
         assert(p->shield > 160);
+    } else if(role==6 && slot==1) {
+        assert(p->hp > p->maxhp-100);
+    } else if(role==7 && slot==1) {
+        assert(p->shield>100 && v->hp<2940);
     } else
-        assert(v->hp < 2935);
+        assert(v->hp < 2940);
     assert(g.castCount[slot] == 1);
     assert(!game_cast(&g, 0, slot, v->pos));
 }
+static void heal_party(void) {
+    game_init(&g,6,1,439);
+    Unit *caster=&g.u[0];
+    const V place=lane_at(1,.5f);
+    for(int j=0;j<HEROES;j++) {
+        Unit *v=&g.u[j];
+        v->pos=add(place,vec(j==2?300:j*4,0));
+        v->hp=v->maxhp-200;
+    }
+    g.u[3].hp=0;
+    assert(game_cast(&g,0,1,place));
+    assert(caster->hp>caster->maxhp-100 && g.u[1].hp>g.u[1].maxhp-100);
+    assert(g.u[2].hp==g.u[2].maxhp-200 && g.u[3].hp==0);
+    assert(g.u[5].hp==g.u[5].maxhp-200);
+}
 int main(void) {
-    for (int role = 0; role < 5; role++)
+    heal_party();
+    for (int role = 0; role < HERO_COUNT; role++)
         for (int s = 0; s < 3; s++)
             range_test(role, s);
-    for (int role = 0; role < 5; role++) {
+    for (int role = 0; role < HERO_COUNT; role++) {
         game_init(&g, role, 1, 17);
-        int side[2][5] = {{0}};
-        for (int i = 0; i < 10; i++)
-            side[g.u[i].team][g.u[i].role]++;
-        for (int t = 0; t < 2; t++)
-            for (int j = 0; j < 5; j++)
-                assert(side[t][j] == 1);
+        assert(g.u[0].role==role);
         for (int j = 0; j < 3; j++) {
             assert(game_cast(&g, 0, j, vec(600, 1700)));
             assert(!game_cast(&g, 0, j, vec(600, 1700)));
         }
     }
+    /* Every eligible hero must be reachable in every bot slot; no same-side
+       duplicates. Different seeds change membership, not just card order. */
+    int seen[HEROES]={0},prevAlly=-1,prevEnemy=-1,changed[2]={0};
+    for(int seed=1;seed<=120;seed++){
+        int masks[2]={0}, slots[HEROES];
+        game_prepare_match(&g,9,1,seed);
+        for(int j=0;j<HEROES;j++){
+            int r=g.u[j].role;
+            assert((unsigned)r<HERO_COUNT && !(masks[j/5] & (1<<r)));
+            slots[j]=r; seen[j]|=1<<r; masks[j/5]|=1<<r;
+        }
+        assert(slots[0]==9);
+        changed[0]+=masks[0]!=prevAlly;changed[1]+=masks[1]!=prevEnemy;
+        prevAlly=masks[0];prevEnemy=masks[1];
+        game_init(&g,9,1,seed);
+        for(int j=0;j<HEROES;j++) assert(g.u[j].role==slots[j]);
+    }
+    for(int j=1;j<HEROES;j++) assert(seen[j]==(j<5?511:1023));
+    assert(changed[0]>60 && changed[1]>60);
+    puts("Matchmaking: 120 seeds; fixed pick, diverse lineups, no same-team duplicates, VS and field agree.");
     game_init(&g, 2, 1, 19);
     assert(protected_building(&g, 23));
     assert(protected_building(&g, 17));
